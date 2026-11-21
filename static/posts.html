@@ -376,7 +376,9 @@
           <span class="loop-status" id="loopStatusBadge">Idle</span>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button type="button" class="ghost" id="approveAllBtn">✓ Approve All Pending Clips</button>
+          <button type="button" class="ghost" id="retryFailedBtn" hidden>↻ Retry Failed Clips</button>
+          <button type="button" class="ghost" id="clearQueueBtn">✕ Clear Approved Queue (0)</button>
+          <button type="button" class="ghost" id="approveAllBtn">✓ Approve All Pending</button>
           <button type="button" class="go" id="loopToggleBtn">▶ Start Sequential Auto-Post Loop</button>
         </div>
       </div>
@@ -401,22 +403,33 @@
             </select>
           </label>
           <label style="display:inline-flex;align-items:center;gap:7px;font-size:13px;cursor:pointer">
+            <input type="checkbox" id="loopAutoRetry" checked style="width:17px;height:17px;accent-color:var(--accent)">
+            Graceful auto-retry &amp; channel failover
+          </label>
+          <label style="display:inline-flex;align-items:center;gap:7px;font-size:13px;cursor:pointer">
             <input type="checkbox" id="loopAutoApprove" style="width:17px;height:17px;accent-color:var(--accent)">
             Auto-approve new incoming clips
           </label>
         </div>
       </div>
+
+      <!-- Live Loop Event Log & Graceful Recovery Monitor -->
+      <details id="loopLogDetails" style="background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:12.5px">
+        <summary style="cursor:pointer;font-weight:600;color:var(--muted)">📋 Sequential Loop Activity &amp; Recovery Log <span id="loopLogCount" style="font-family:var(--f-mono);color:var(--text)">(0 events)</span></summary>
+        <div id="loopLogList" style="margin-top:8px;max-height:140px;overflow-y:auto;display:grid;gap:4px;font-family:var(--f-mono);font-size:12px"></div>
+      </details>
     </section>
 
     <!-- 4. FILTER TABS & CLIP CARDS -->
     <div class="bar-head">
       <div class="tabs" role="tablist" aria-label="Filter clips">
-        <button type="button" class="tab active" data-filter="all">All Clips</button>
-        <button type="button" class="tab" data-filter="pending">Pending Approval</button>
-        <button type="button" class="tab" data-filter="approved">✓ Approved Queue</button>
-        <button type="button" class="tab" data-filter="busy">Uploading</button>
-        <button type="button" class="tab" data-filter="done">Posted</button>
-        <button type="button" class="tab" data-filter="rejected">✗ Rejected</button>
+        <button type="button" class="tab active" data-filter="all">All Clips <span id="fCountAll"></span></button>
+        <button type="button" class="tab" data-filter="pending">Pending Approval <span id="fCountPend"></span></button>
+        <button type="button" class="tab" data-filter="approved">✓ Approved Queue <span id="fCountApp"></span></button>
+        <button type="button" class="tab" data-filter="busy">Uploading <span id="fCountBusy"></span></button>
+        <button type="button" class="tab" data-filter="done">Posted <span id="fCountDone"></span></button>
+        <button type="button" class="tab" data-filter="error">Failed / Quota <span id="fCountErr"></span></button>
+        <button type="button" class="tab" data-filter="rejected">✗ Rejected <span id="fCountRej"></span></button>
       </div>
       <span id="showingCount" style="color:var(--muted);font:500 13px var(--f-mono)">0 clips</span>
     </div>
@@ -600,10 +613,12 @@ function renderSocialSetup(soc) {
 
 /* ---------- Summary & Loop State Rendering ---------- */
 function renderSummaryAndLoop(s, loop) {
+  const unpostedApproved = s.approved_unposted_count || 0;
+  const postedApproved = s.approved_posted_count || 0;
   $("#sTotal").textContent = String(s.total_clips || 0);
-  $("#sTotalSub").textContent = `${s.pending_approval_count || 0} pending · ${s.approved_count || 0} approved`;
-  $("#sApproved").textContent = String(s.approved_unposted_count || 0);
-  $("#sQueueSub").textContent = `${s.queued_count || 0} queued · ${s.uploading_count || 0} uploading`;
+  $("#sTotalSub").textContent = `${s.pending_approval_count || 0} pending · ${unpostedApproved} in queue · ${s.posted_count || 0} posted`;
+  $("#sApproved").textContent = String(unpostedApproved);
+  $("#sQueueSub").textContent = `${s.queued_count || 0} queued · ${s.uploading_count || 0} uploading · ${postedApproved} done`;
   $("#sPosted").textContent = String(s.posted_count || 0);
   $("#sFailedSub").textContent = `${s.failed_count || 0} failed · ${s.rejected_count || 0} rejected`;
   $("#sViews").textContent = (s.total_views || 0).toLocaleString();
@@ -613,7 +628,24 @@ function renderSummaryAndLoop(s, loop) {
   const payout = (s.estimated_payout_usd || 0).toFixed(2);
   $("#sComments").textContent = `${eng}%`;
   $("#sComments").className = eng >= 0.8 ? "good" : "";
-  $("#sUpdated").textContent = `Target >= 0.8% · Est. $${payout} ($1/1K)`;
+  $("#sUpdated").textContent = `Target >= 0.8% · Est. $${payout}`;
+
+  // Update tab counters so every log and badge matches
+  $("#fCountAll").textContent = `(${s.total_clips || 0})`;
+  $("#fCountPend").textContent = `(${s.pending_approval_count || 0})`;
+  $("#fCountApp").textContent = `(${unpostedApproved})`;
+  $("#fCountBusy").textContent = `(${(s.queued_count || 0) + (s.uploading_count || 0)})`;
+  $("#fCountDone").textContent = `(${s.posted_count || 0})`;
+  $("#fCountErr").textContent = `(${s.failed_count || 0})`;
+  $("#fCountRej").textContent = `(${s.rejected_count || 0})`;
+
+  const clearBtn = $("#clearQueueBtn");
+  clearBtn.textContent = `✕ Clear Approved Queue (${unpostedApproved})`;
+  clearBtn.disabled = unpostedApproved === 0;
+
+  const retryBtn = $("#retryFailedBtn");
+  retryBtn.hidden = !(s.failed_count > 0);
+  retryBtn.textContent = `↻ Retry Failed Clips (${s.failed_count || 0})`;
 
   const badge = $("#loopStatusBadge");
   const btn = $("#loopToggleBtn");
@@ -621,7 +653,16 @@ function renderSummaryAndLoop(s, loop) {
   badge.className = "loop-status" + (running ? " on" : "");
   badge.textContent = loop.status_text || (running ? "Running sequential loop..." : "Idle");
   btn.className = running ? "go stop" : "go";
-  btn.textContent = running ? "⏹ Stop Sequential Loop" : "▶ Start Sequential Auto-Post Loop";
+  btn.textContent = running ? "⏹ Pause Sequential Loop" : (loop.last_error ? "▶ Resume Sequential Loop" : "▶ Start Sequential Auto-Post Loop");
+
+  const events = loop.events || [];
+  $("#loopLogCount").textContent = `(${events.length} event${events.length === 1 ? "" : "s"})`;
+  $("#loopLogList").innerHTML = events.length
+    ? events.map((ev) => {
+        const col = ev.level === "ok" ? "var(--good)" : ev.level === "err" ? "var(--bad)" : ev.level === "warn" ? "#fbbf24" : "var(--muted)";
+        return `<div style="color:${col}">[${esc(ev.time)}] ${esc(ev.message)}</div>`;
+      }).join("")
+    : `<div style="color:var(--muted)">No loop events yet.</div>`;
 
   if (!document.querySelector(".loop-panel").contains(document.activeElement)) {
     if (Array.isArray(loop.platforms)) {
@@ -631,6 +672,9 @@ function renderSummaryAndLoop(s, loop) {
       $("#loopDelay").value = String(loop.delay_seconds);
     }
     $("#loopAutoApprove").checked = !!loop.auto_approve_new;
+    if (typeof loop.auto_retry_errors === "boolean") {
+      $("#loopAutoRetry").checked = loop.auto_retry_errors;
+    }
   }
 }
 
@@ -651,6 +695,7 @@ async function syncLoopSettings(toggleRun = null) {
         platforms,
         delay_seconds: Number($("#loopDelay").value || 10),
         auto_approve_new: $("#loopAutoApprove").checked,
+        auto_retry_errors: $("#loopAutoRetry").checked,
       }),
     });
     lastStructSig = "";
@@ -666,6 +711,7 @@ $("#loopToggleBtn").addEventListener("click", () => {
 });
 $("#loopDelay").addEventListener("change", () => { if (snapshot.loop?.running) syncLoopSettings(true); });
 $("#loopAutoApprove").addEventListener("change", () => syncLoopSettings(!!snapshot.loop?.running));
+$("#loopAutoRetry").addEventListener("change", () => syncLoopSettings(!!snapshot.loop?.running));
 $$(".loop-plat").forEach((cb) => cb.addEventListener("change", () => { if (snapshot.loop?.running) syncLoopSettings(true); }));
 
 $("#approveAllBtn").addEventListener("click", async () => {
@@ -674,6 +720,34 @@ $("#approveAllBtn").addEventListener("click", async () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ approve_all_pending: true }),
+    });
+    lastStructSig = "";
+    await refresh();
+  } catch (e) {
+    alert(e.message);
+  }
+});
+
+$("#clearQueueBtn").addEventListener("click", async () => {
+  try {
+    await api("/api/posts/approve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reset_all_to_pending: true }),
+    });
+    lastStructSig = "";
+    await refresh();
+  } catch (e) {
+    alert(e.message);
+  }
+});
+
+$("#retryFailedBtn").addEventListener("click", async () => {
+  try {
+    await api("/api/posts/approve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ retry_failed: true }),
     });
     lastStructSig = "";
     await refresh();
@@ -711,7 +785,8 @@ function renderList() {
     const ap = it.approval_status || "pending";
     if (currentFilter === "all") return true;
     if (currentFilter === "pending") return ap === "pending";
-    if (currentFilter === "approved") return ap === "approved";
+    // Approved Queue tab matches the summary Approved Queue metric (only approved clips still waiting in queue)
+    if (currentFilter === "approved") return ap === "approved" && !!it.queue_position;
     if (currentFilter === "rejected") return ap === "rejected";
     return st === currentFilter;
   });

@@ -251,12 +251,17 @@ class WatcherController:
         for meta_path in cw_config.OUTPUT_DIR.glob("*.json"):
             try:
                 data = json.loads(meta_path.read_text(encoding="utf-8"))
-                yt = data.get("youtube")
-                if isinstance(yt, dict) and yt.get("status") in ("queued", "uploading"):
-                    data["youtube"] = {
-                        "status": "error",
-                        "error": "The app was closed during the upload. Post it again.",
-                    }
+                changed = False
+                for plat in ("youtube", "tiktok", "instagram"):
+                    pinfo = data.get(plat)
+                    if isinstance(pinfo, dict) and pinfo.get("status") in ("queued", "uploading"):
+                        data[plat] = {
+                            "status": "error",
+                            "error": "The app was closed during the upload. It will resume automatically when the loop runs.",
+                            "retryable": True,
+                        }
+                        changed = True
+                if changed:
                     meta_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
             except (OSError, ValueError):
                 continue

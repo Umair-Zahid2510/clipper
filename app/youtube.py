@@ -250,9 +250,12 @@ def start_auth(redirect_uri: str) -> str:
     return url
 
 
+_ALLOWED_RETURN_PATHS = ("/", "/watcher", "/posts", "/campaigns")
+
+
 def set_return_to(auth_url: str, return_to: str) -> None:
-    """Record which page (/ or /watcher) initiated the OAuth flow."""
-    if return_to not in ("/", "/watcher"):
+    """Record which page (/ or /watcher or /posts or /campaigns) initiated the OAuth flow."""
+    if return_to not in _ALLOWED_RETURN_PATHS:
         return
     q = parse_qs(urlparse(auth_url).query)
     state = (q.get("state") or [None])[0]
@@ -264,7 +267,7 @@ def get_return_to(state: str | None) -> str:
     """Return the dashboard path associated with an in-flight OAuth state."""
     if state and state in _pending:
         dest = _pending[state].get("return_to")
-        if dest in ("/", "/watcher"):
+        if dest in _ALLOWED_RETURN_PATHS:
             return dest
     return "/"
 

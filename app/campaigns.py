@@ -319,3 +319,4 @@ def parse_rules_brief(text: str) -> dict:
         "cliffhanger_duration": 4.0,
         "notes": f"Parsed from brief ({len(raw)} chars).",
     }
+

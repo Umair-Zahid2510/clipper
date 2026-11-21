@@ -129,9 +129,10 @@ def _load_existing() -> None:
             job["status"] = "error"
             job["error"] = "The app was closed while this was processing."
         for clip in job.get("clips") or []:
-            yt = clip.get("youtube")
-            if yt and yt.get("status") in ("queued", "uploading"):
-                clip["youtube"] = {"status": "error", "error": "The app was closed during the upload. Post it again."}
+            for plat in ("youtube", "tiktok", "instagram"):
+                pinfo = clip.get(plat)
+                if pinfo and pinfo.get("status") in ("queued", "uploading"):
+                    clip[plat] = {"status": "error", "error": "The app was closed during the upload. Post it again.", "retryable": True}
         _jobs[job["id"]] = job
 
 
@@ -868,6 +869,8 @@ class ApproveRequest(BaseModel):
     key: str | None = None
     approval_status: str = "approved"  # "pending", "approved", "rejected"
     approve_all_pending: bool = False
+    reset_all_to_pending: bool = False
+    retry_failed: bool = False
 
 
 class MultiPublishRequest(BaseModel):
@@ -880,6 +883,7 @@ class SequentialLoopRequest(BaseModel):
     platforms: list[str] = Field(default_factory=lambda: ["youtube"])
     delay_seconds: int = Field(default=10, ge=0, le=86400)
     auto_approve_new: bool = False
+    auto_retry_errors: bool = True
 
 
 _loop_lock = threading.Lock()
@@ -888,15 +892,34 @@ _loop_state: dict = {
     "platforms": ["youtube"],
     "delay_seconds": 10,
     "auto_approve_new": False,
+    "auto_retry_errors": True,
     "current_key": None,
     "current_title": None,
     "current_platform": None,
     "posted_in_run": 0,
+    "retried_in_run": 0,
     "last_error": None,
     "status_text": "Idle — approve clips below and start the loop",
     "next_post_at": None,
+    "events": [],
 }
 _loop_thread: threading.Thread | None = None
+
+
+def _log_loop_event(level: str, message: str, key: str | None = None, platform: str | None = None) -> None:
+    """Append a timestamped event to the sequential loop log (kept to last 40 entries)."""
+    entry = {
+        "ts": time.time(),
+        "time": datetime.now().strftime("%H:%M:%S"),
+        "level": level,  # "info", "ok", "warn", "err"
+        "message": message,
+        "key": key,
+        "platform": platform,
+    }
+    with _loop_lock:
+        ev = list(_loop_state.get("events") or [])
+        ev.insert(0, entry)
+        _loop_state["events"] = ev[:40]
 
 
 @app.get("/posts")
@@ -1153,31 +1176,39 @@ def list_posts_and_stats(refresh_stats: bool = False) -> dict:
     yt_stats = youtube.fetch_video_stats(video_ids, force=refresh_stats)
 
     ready_n = queued_n = uploading_n = posted_n = failed_n = 0
-    pending_approval_n = approved_n = rejected_n = 0
+    pending_approval_n = approved_n = approved_posted_n = rejected_n = 0
     total_views = total_likes = total_comments = 0
     total_payout = 0.0
+    active_camp = campaigns.get_campaign()
+    camp_cpm = float(active_camp.get("cpm_usd") or 1.0)
+    camp_max_pay = float(active_camp.get("max_payout_usd") or 300.0)
+    camp_min_eng = float(active_camp.get("min_engagement_pct") or 0.8)
 
-    # Assign sequential queue numbers (oldest approved clip first, or list order)
+    # Assign sequential queue numbers only to approved clips that have NOT finished posting
     queue_pos = 0
     for it in items:
         ap = it.get("approval_status", "pending")
-        if ap == "approved":
-            approved_n += 1
-        elif ap == "rejected":
-            rejected_n += 1
-        else:
-            pending_approval_n += 1
-
         y = it.get("youtube") or {}
         tt = it.get("tiktok") or {}
         ig = it.get("instagram") or {}
         statuses = [s.get("status") for s in (y, tt, ig) if isinstance(s, dict) and s.get("status")]
 
-        # Determine if this approved clip still needs to be posted to any of its target platforms
+        t_plats = it.get("target_platforms") or ["youtube"]
+        all_targets_done = all(((it.get(p) or {}).get("status") == "done") for p in t_plats)
         needs_post = any(
             ((it.get(p) or {}).get("status") not in ("done", "queued", "uploading"))
-            for p in (it.get("target_platforms") or ["youtube"])
+            for p in t_plats
         )
+
+        if ap == "approved":
+            approved_n += 1
+            if all_targets_done:
+                approved_posted_n += 1
+        elif ap == "rejected":
+            rejected_n += 1
+        else:
+            pending_approval_n += 1
+
         if ap == "approved" and needs_post:
             queue_pos += 1
             it["queue_position"] = queue_pos
@@ -1203,9 +1234,9 @@ def list_posts_and_stats(refresh_stats: bool = False) -> dict:
             lk = s.get("likes", 0)
             cm = s.get("comments", 0)
             eng = round(((lk + cm) / v) * 100, 2) if v > 0 else 0.0
-            payout = round(min(300.0, (v / 1000.0) * 1.0), 2) if eng >= 0.8 else 0.0
+            payout = round(min(camp_max_pay, (v / 1000.0) * camp_cpm), 2) if eng >= camp_min_eng else 0.0
             s["engagement_rate"] = eng
-            s["meets_08_pct"] = eng >= 0.8
+            s["meets_08_pct"] = eng >= camp_min_eng
             s["estimated_payout_usd"] = payout
             it["live_stats"] = s
             total_views += v
@@ -1232,6 +1263,7 @@ def list_posts_and_stats(refresh_stats: bool = False) -> dict:
             "failed_count": failed_n,
             "pending_approval_count": pending_approval_n,
             "approved_count": approved_n,
+            "approved_posted_count": approved_posted_n,
             "approved_unposted_count": queue_pos,
             "rejected_count": rejected_n,
             "daily_quota_limit": 100,
@@ -1239,7 +1271,7 @@ def list_posts_and_stats(refresh_stats: bool = False) -> dict:
             "total_likes": total_likes,
             "total_comments": total_comments,
             "overall_engagement_rate": overall_eng,
-            "meets_08_pct": overall_eng >= 0.8,
+            "meets_08_pct": overall_eng >= camp_min_eng,
             "estimated_payout_usd": round(total_payout, 2),
             "updated_at": time.time(),
         },
@@ -1344,12 +1376,38 @@ def approve_post_clips(req: ApproveRequest) -> dict:
     if req.approval_status not in socials.APPROVAL_STATES:
         raise HTTPException(400, "Invalid approval status.")
     updated = 0
+    if req.reset_all_to_pending:
+        snap = list_posts_and_stats(refresh_stats=False)
+        for it in snap["items"]:
+            # Only reset unposted clips back to pending; keep already-posted clips marked as posted
+            t_plats = it.get("target_platforms") or ["youtube"]
+            all_done = all(((it.get(p) or {}).get("status") == "done") for p in t_plats)
+            if not all_done and it.get("approval_status") == "approved":
+                if _set_clip_field_by_key(it["key"], approval_status="pending"):
+                    updated += 1
+        _log_loop_event("info", f"Cleared {updated} unposted clips from Approved Queue back to Pending.")
+        return {"ok": True, "updated": updated}
+    if req.retry_failed:
+        snap = list_posts_and_stats(refresh_stats=False)
+        for it in snap["items"]:
+            cleared_any = False
+            for p in socials.PLATFORMS:
+                if (it.get(p) or {}).get("status") == "error":
+                    _set_clip_field_by_key(it["key"], **{p: None, "approval_status": "approved"})
+                    cleared_any = True
+            if cleared_any:
+                updated += 1
+        _log_loop_event("info", f"Reset {updated} failed clip(s) for graceful retry.")
+        return {"ok": True, "updated": updated}
     if req.approve_all_pending:
         snap = list_posts_and_stats(refresh_stats=False)
         for it in snap["items"]:
-            if it.get("approval_status") != "approved":
+            t_plats = it.get("target_platforms") or ["youtube"]
+            all_done = all(((it.get(p) or {}).get("status") == "done") for p in t_plats)
+            if not all_done and it.get("approval_status") != "approved":
                 if _set_clip_field_by_key(it["key"], approval_status="approved"):
                     updated += 1
+        _log_loop_event("info", f"Approved {updated} pending clip(s) into the sequential queue.")
         return {"ok": True, "updated": updated}
     if not req.key:
         raise HTTPException(400, "Provide a clip key or set approve_all_pending=true.")
@@ -1441,8 +1499,21 @@ def publish_clip_multi_social(req: MultiPublishRequest) -> dict:
     return {"ok": True, "key": req.key, "platforms": platforms, "queued": queued}
 
 
+def _classify_upload_error(err_msg: str) -> str:
+    """Classify an upload error into 'quota_or_auth', 'transient', or 'clip_invalid'."""
+    low = (err_msg or "").lower()
+    if any(k in low for k in ("429", "quota", "daily limit", "100 uploads", "upload limit")):
+        return "quota"
+    if any(k in low for k in ("401", "expired", "revoked", "not connected", "reconnect", "access_token")):
+        return "auth"
+    if any(k in low for k in ("rejected the title", "rejected the description", "rejected the hashtags", "invalid")):
+        return "clip_invalid"
+    return "transient"
+
+
 def _sequential_loop_worker() -> None:
-    """Background worker that posts approved clips one by one in sequence across target socials."""
+    """Background worker that posts approved clips one by one in sequence across target socials
+    with graceful error classification, automatic exponential backoff retry, and account rotation."""
     while True:
         with _loop_lock:
             if not _loop_state["running"]:
@@ -1454,6 +1525,7 @@ def _sequential_loop_worker() -> None:
                 return
             loop_plats = list(_loop_state["platforms"])
             delay_s = int(_loop_state["delay_seconds"])
+            auto_retry = bool(_loop_state.get("auto_retry_errors", True))
 
         snap = list_posts_and_stats(refresh_stats=False)
         acc_status = snap.get("socials") or {}
@@ -1461,17 +1533,30 @@ def _sequential_loop_worker() -> None:
         # Find the next approved clip that hasn't completed posting on all target platforms
         candidate = None
         candidate_plats: list[str] = []
+        now = time.time()
         for it in snap["items"]:
             if it.get("approval_status") != "approved":
                 continue
             c_plats = _normalize_target_platforms(it.get("target_platforms") or loop_plats)
-            # Only post to platforms that are also enabled in loop_plats (or the clip's own target_platforms)
             active_plats = [p for p in loop_plats if p in c_plats] or loop_plats
-            pending_plats = [
-                p for p in active_plats
-                if (it.get(p) or {}).get("status") not in ("done", "queued", "uploading")
-                and acc_status.get(p, {}).get("connected")
-            ]
+            pending_plats = []
+            for p in active_plats:
+                if not acc_status.get(p, {}).get("connected"):
+                    continue
+                pinfo = it.get(p) or {}
+                pst = pinfo.get("status")
+                if pst in ("done", "queued", "uploading"):
+                    continue
+                if pst == "error":
+                    if not auto_retry:
+                        continue
+                    # Respect per-clip retry cooldown & max attempts (3) for transient errors
+                    attempts = int(pinfo.get("attempts") or 1)
+                    next_retry_at = float(pinfo.get("next_retry_at") or 0)
+                    err_kind = pinfo.get("error_kind") or _classify_upload_error(pinfo.get("error") or "")
+                    if err_kind in ("quota", "auth", "clip_invalid") or attempts >= 3 or now < next_retry_at:
+                        continue
+                pending_plats.append(p)
             if pending_plats:
                 candidate = it
                 candidate_plats = pending_plats
@@ -1485,10 +1570,11 @@ def _sequential_loop_worker() -> None:
                 _loop_state["current_title"] = None
                 _loop_state["current_platform"] = None
                 _loop_state["next_post_at"] = None
-                _loop_state["status_text"] = "Monitoring queue — waiting for newly approved clips..."
+                _loop_state["status_text"] = "Monitoring queue — waiting for newly approved or retry-ready clips..."
             time.sleep(2.0)
             continue
 
+        paused_due_to_fatal = False
         for p in candidate_plats:
             with _loop_lock:
                 if not _loop_state["running"]:
@@ -1499,15 +1585,79 @@ def _sequential_loop_worker() -> None:
                 _loop_state["next_post_at"] = None
                 _loop_state["status_text"] = f"Posting '{candidate['title'][:38]}' to {p.upper()}..."
 
+            prev_info = candidate.get(p) or {}
+            prev_attempts = int(prev_info.get("attempts") or 0)
             res = _publish_single_platform_sync(candidate, p)
-            with _loop_lock:
-                if res.get("status") == "done":
+
+            if res.get("status") == "done":
+                with _loop_lock:
                     _loop_state["posted_in_run"] = int(_loop_state.get("posted_in_run", 0)) + 1
                     _loop_state["last_error"] = None
                     _loop_state["status_text"] = f"Posted '{candidate['title'][:38]}' to {p.upper()}"
+                _log_loop_event("ok", f"Posted '{candidate['title'][:45]}' to {p.upper()} ({res.get('url') or 'done'})", candidate["key"], p)
+            else:
+                err_msg = res.get("error") or "Upload failed"
+                err_kind = _classify_upload_error(err_msg)
+                attempts = prev_attempts + 1
+
+                # If YouTube hit daily quota and another YouTube channel is linked, rotate to it automatically!
+                rotated_to = None
+                if err_kind == "quota" and p == "youtube":
+                    yt_accs = (acc_status.get("youtube") or {}).get("accounts") or []
+                    cur_id = (acc_status.get("youtube") or {}).get("active_id")
+                    alt = next((a for a in yt_accs if a.get("id") != cur_id), None)
+                    if alt:
+                        try:
+                            youtube.select_account(alt["id"])
+                            rotated_to = alt.get("title") or alt["id"]
+                            _set_clip_field_by_key(candidate["key"], account_id=alt["id"], youtube=None)
+                            _log_loop_event("warn", f"YouTube quota hit on current channel — auto-switched to '{rotated_to}' and queued clip for immediate resume.", candidate["key"], p)
+                        except Exception:
+                            rotated_to = None
+
+                if rotated_to:
+                    continue
+
+                backoff_s = min(60, 5 * (2 ** (attempts - 1)))
+                enriched_err = {
+                    "status": "error",
+                    "error": err_msg,
+                    "error_kind": err_kind,
+                    "attempts": attempts,
+                    "next_retry_at": time.time() + backoff_s if err_kind == "transient" and attempts < 3 else None,
+                    "retryable": err_kind != "clip_invalid",
+                }
+                _set_clip_field_by_key(candidate["key"], **{p: enriched_err})
+
+                if err_kind in ("quota", "auth"):
+                    # Check if any other selected platform in loop_plats is still connected and usable
+                    other_connected = [x for x in loop_plats if x != p and acc_status.get(x, {}).get("connected")]
+                    if not other_connected:
+                        with _loop_lock:
+                            _loop_state["running"] = False
+                            _loop_state["current_key"] = None
+                            _loop_state["current_platform"] = None
+                            _loop_state["last_error"] = err_msg
+                            _loop_state["status_text"] = f"Paused on {p.upper()} ({err_kind}): {err_msg[:90]} — click Resume when ready"
+                        _log_loop_event("err", f"Loop auto-paused ({p.upper()} {err_kind}): {err_msg}. Add/switch channel or wait for quota reset, then click Resume.", candidate["key"], p)
+                        paused_due_to_fatal = True
+                        break
+                    else:
+                        _log_loop_event("warn", f"{p.upper()} paused ({err_kind}): {err_msg[:80]}. Continuing loop on {', '.join(other_connected)}.", candidate["key"], p)
+                elif err_kind == "transient" and attempts < 3:
+                    with _loop_lock:
+                        _loop_state["retried_in_run"] = int(_loop_state.get("retried_in_run", 0)) + 1
+                        _loop_state["last_error"] = err_msg
+                        _loop_state["status_text"] = f"Transient error on {p.upper()} (attempt {attempts}/3) — auto-retrying in {backoff_s}s..."
+                    _log_loop_event("warn", f"Transient failure on '{candidate['title'][:38]}' ({p.upper()}, attempt {attempts}/3): {err_msg[:80]} — scheduled auto-retry in {backoff_s}s.", candidate["key"], p)
                 else:
-                    _loop_state["last_error"] = res.get("error")
-                    _loop_state["status_text"] = f"Error on {p.upper()}: {res.get('error')}"
+                    with _loop_lock:
+                        _loop_state["last_error"] = err_msg
+                        _loop_state["status_text"] = f"Skipped '{candidate['title'][:32]}' on {p.upper()} after error: {err_msg[:70]}"
+                    _log_loop_event("err", f"Failed '{candidate['title'][:40]}' on {p.upper()}: {err_msg}", candidate["key"], p)
+
+        if paused_due_to_fatal:
+            return
 
         # Pacing delay before the next clip in sequence
         if delay_s > 0:
@@ -1536,12 +1686,27 @@ def configure_sequential_loop(req: SequentialLoopRequest) -> dict:
             labels = ", ".join({"youtube": "YouTube Shorts", "tiktok": "TikTok", "instagram": "Instagram Reels"}[p] for p in plats)
             raise HTTPException(409, f"Connect at least one selected platform ({labels}) in Social Accounts & Tokens Setup before starting the sequential loop.")
 
+        # On start/resume, automatically reset retryable error states on approved clips so they gracefully resume
+        snap = list_posts_and_stats(refresh_stats=False)
+        resumed_errors = 0
+        for it in snap["items"]:
+            if it.get("approval_status") != "approved":
+                continue
+            for p in plats:
+                pinfo = it.get(p) or {}
+                if pinfo.get("status") == "error":
+                    _set_clip_field_by_key(it["key"], **{p: None})
+                    resumed_errors += 1
+        if resumed_errors:
+            _log_loop_event("info", f"Gracefully reset {resumed_errors} previously failed upload(s) to resume from queue.")
+
     with _loop_lock:
         was_running = _loop_state["running"]
         _loop_state["running"] = bool(req.running)
         _loop_state["platforms"] = plats
         _loop_state["delay_seconds"] = int(req.delay_seconds)
         _loop_state["auto_approve_new"] = bool(req.auto_approve_new)
+        _loop_state["auto_retry_errors"] = bool(req.auto_retry_errors)
         if req.running and not was_running:
             _loop_state["posted_in_run"] = 0
             _loop_state["last_error"] = None
@@ -1554,7 +1719,12 @@ def configure_sequential_loop(req: SequentialLoopRequest) -> dict:
             _loop_state["current_platform"] = None
             _loop_state["next_post_at"] = None
             _loop_state["status_text"] = "Stopped"
-        return dict(_loop_state)
+        res_state = dict(_loop_state)
+    if req.running and not was_running:
+        _log_loop_event("info", f"Sequential loop started for {', '.join(p.upper() for p in plats)} (delay {req.delay_seconds}s).")
+    elif not req.running and was_running:
+        _log_loop_event("info", "Sequential loop paused by user.")
+    return res_state
 
 
 @app.post("/api/posts/auto")

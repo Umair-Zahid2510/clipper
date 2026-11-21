@@ -431,4 +431,51 @@ def test_campaigns_studio_brief_parser_general_mode_and_cliffhanger_hook(monkeyp
     assert "Watch IShowSpeed Live on YouTube" not in gen_meta["description"]
 
 
+def test_graceful_resume_queue_clear_and_error_classification(monkeypatch, tmp_path):
+    from app import socials
+
+    monkeypatch.setattr(socials, "SOCIAL_ACCOUNTS_PATH", tmp_path / "social_accounts.json")
+    monkeypatch.setattr(watcher.cw_config, "OUTPUT_DIR", tmp_path)
+    monkeypatch.setattr(watcher, "OUTPUT_DIR", tmp_path)
+    monkeypatch.setattr(main, "_jobs", {})
+
+    mp4 = tmp_path / "kreekcraft_20261121_090000.mp4"
+    srt = tmp_path / "kreekcraft_20261121_090000.srt"
+    mp4.write_bytes(b"\0" * 2048)
+    srt.write_text("1\n00:00:00,100 --> 00:00:02,000\nGRACEFUL RESUME TEST!\n", encoding="utf-8")
+
+    client = TestClient(main.app)
+    key = f"watcher:{mp4.name}"
+
+    # 1. Approve clip -> queue_position == 1, approved_unposted_count == 1
+    client.post("/api/posts/approve", json={"key": key, "approval_status": "approved"})
+    snap1 = client.get("/api/posts").json()
+    assert snap1["summary"]["approved_unposted_count"] == 1
+    assert snap1["items"][0]["queue_position"] == 1
+
+    # 2. Simulate an upload error on YouTube and verify retry_failed clears it for graceful resume
+    main._set_clip_field_by_key(key, youtube={"status": "error", "error": "Transient 503 network error"})
+    snap2 = client.get("/api/posts").json()
+    assert snap2["summary"]["failed_count"] == 1
+    retry_res = client.post("/api/posts/approve", json={"retry_failed": True})
+    assert retry_res.status_code == 200 and retry_res.json()["updated"] == 1
+    snap3 = client.get("/api/posts").json()
+    assert snap3["summary"]["failed_count"] == 0
+    assert snap3["items"][0]["youtube"] is None
+
+    # 3. Clear Approved Queue (reset_all_to_pending) -> approved_unposted_count becomes 0
+    clr_res = client.post("/api/posts/approve", json={"reset_all_to_pending": True})
+    assert clr_res.status_code == 200 and clr_res.json()["updated"] == 1
+    snap4 = client.get("/api/posts").json()
+    assert snap4["summary"]["approved_unposted_count"] == 0
+    assert snap4["items"][0]["approval_status"] == "pending"
+    assert snap4["items"][0]["queue_position"] is None
+
+    # 4. Verify error classifier
+    assert main._classify_upload_error("YouTube refused the upload (429): Quota exceeded") == "quota"
+    assert main._classify_upload_error("401: sign-in has expired") == "auth"
+    assert main._classify_upload_error("Connection reset by peer") == "transient"
+
+
+
 
