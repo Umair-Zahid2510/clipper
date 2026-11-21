@@ -79,20 +79,26 @@ def save_youtube_client_credentials(client_id: str, client_secret: str) -> dict:
     return all_accounts_status()
 
 
-def save_tiktok_client_credentials(client_key: str, client_secret: str) -> dict:
-    """Save TIKTOK_CLIENT_KEY and TIKTOK_CLIENT_SECRET to .env and activate immediately in memory."""
+def save_tiktok_client_credentials(
+    client_key: str,
+    client_secret: str,
+    redirect_uri: str | None = None,
+) -> dict:
+    """Save TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET, and optional TIKTOK_REDIRECT_URI to .env and activate immediately in memory."""
     ck = (client_key or "").strip()
     cs = (client_secret or "").strip()
+    ru = (redirect_uri or os.environ.get("TIKTOK_REDIRECT_URI") or "https://github.com/Umair-Zahid2510/clipper").strip()
     if not ck or not cs:
         raise ValueError("Both TikTok Client Key and Client Secret are required.")
 
     os.environ["TIKTOK_CLIENT_KEY"] = ck
     os.environ["TIKTOK_CLIENT_SECRET"] = cs
+    os.environ["TIKTOK_REDIRECT_URI"] = ru
 
     env_path = config.ROOT / ".env"
     lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.is_file() else []
     out_lines: list[str] = []
-    seen_k = seen_s = False
+    seen_k = seen_s = seen_r = False
     for line in lines:
         if re.match(r"^\s*#?\s*TIKTOK_CLIENT_KEY\s*=", line):
             out_lines.append(f"TIKTOK_CLIENT_KEY={ck}")
@@ -100,67 +106,146 @@ def save_tiktok_client_credentials(client_key: str, client_secret: str) -> dict:
         elif re.match(r"^\s*#?\s*TIKTOK_CLIENT_SECRET\s*=", line):
             out_lines.append(f"TIKTOK_CLIENT_SECRET={cs}")
             seen_s = True
+        elif re.match(r"^\s*#?\s*TIKTOK_REDIRECT_URI\s*=", line):
+            out_lines.append(f"TIKTOK_REDIRECT_URI={ru}")
+            seen_r = True
         else:
             out_lines.append(line)
     if not seen_k:
         out_lines.append(f"TIKTOK_CLIENT_KEY={ck}")
     if not seen_s:
         out_lines.append(f"TIKTOK_CLIENT_SECRET={cs}")
+    if not seen_r:
+        out_lines.append(f"TIKTOK_REDIRECT_URI={ru}")
     env_path.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
     return all_accounts_status()
 
 
 _tt_pending: dict[str, dict] = {}
+_tt_last_state: str | None = None
 
 
-def start_tiktok_auth(redirect_uri: str, handle_hint: str = "@clipcurrent1000") -> str:
-    """Build the TikTok OAuth v2 authorization URL for 1-click browser login."""
+def _generate_pkce_pair() -> tuple[str, str]:
+    """Generate RFC 7636 PKCE (code_verifier, S256 code_challenge) required by TikTok Desktop/Web OAuth v2."""
+    import base64
+    import hashlib
+    import secrets
+
+    verifier = secrets.token_urlsafe(48)[:64]
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    return verifier, challenge
+
+
+def start_tiktok_auth(
+    redirect_uri: str | None = None,
+    handle_hint: str = "@clipcurrent1000",
+) -> str:
+    """Build the TikTok OAuth v2 authorization URL with PKCE (code_challenge & code_challenge_method=S256)."""
+    global _tt_last_state
     from urllib.parse import urlencode
 
     ck = os.environ.get("TIKTOK_CLIENT_KEY", "").strip()
     cs = os.environ.get("TIKTOK_CLIENT_SECRET", "").strip()
     if not ck or not cs:
         raise ValueError("Save your TikTok Sandbox/App Client Key & Client Secret first.")
+    final_redirect = (
+        (redirect_uri or "").strip()
+        or os.environ.get("TIKTOK_REDIRECT_URI", "").strip()
+        or "https://github.com/Umair-Zahid2510/clipper"
+    )
+    verifier, challenge = _generate_pkce_pair()
     state = f"tt_{uuid.uuid4().hex[:18]}"
     _tt_pending[state] = {
         "client_key": ck,
         "client_secret": cs,
-        "redirect_uri": redirect_uri,
+        "redirect_uri": final_redirect,
+        "code_verifier": verifier,
+        "code_challenge": challenge,
         "handle_hint": (handle_hint or "@clipcurrent1000").strip(),
         "created": time.time(),
     }
+    _tt_last_state = state
     params = {
         "client_key": ck,
         "scope": "user.info.basic,video.publish,video.upload",
         "response_type": "code",
-        "redirect_uri": redirect_uri,
+        "redirect_uri": final_redirect,
         "state": state,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
     }
     return f"https://www.tiktok.com/v2/auth/authorize/?{urlencode(params)}"
 
 
-def finish_tiktok_auth(state: str, code: str) -> dict:
-    """Exchange TikTok authorization code for access_token, refresh_token, open_id, and save account."""
-    pending = _tt_pending.pop(state, None)
+def finish_tiktok_auth(
+    state: str | None,
+    code_or_url: str,
+    handle_override: str | None = None,
+    redirect_uri_override: str | None = None,
+) -> dict:
+    """Exchange TikTok authorization code (or full redirected URL containing ?code=...) with PKCE code_verifier."""
+    from urllib.parse import parse_qs, unquote, urlparse
+
+    raw = (code_or_url or "").strip()
+    if not raw:
+        raise ValueError("Paste the redirected URL (or authorization code) from TikTok.")
+
+    extracted_code = raw
+    extracted_state = (state or "").strip()
+    if "://" in raw or "code=" in raw:
+        parsed = urlparse(raw if "://" in raw else f"https://example.com/?{raw.lstrip('?')}")
+        qs = parse_qs(parsed.query)
+        if qs.get("code"):
+            extracted_code = unquote(qs["code"][0])
+        if not extracted_state and qs.get("state"):
+            extracted_state = qs["state"][0]
+
+    pending = _tt_pending.pop(extracted_state, None)
+    if pending is None and _tt_last_state and _tt_last_state in _tt_pending:
+        pending = _tt_pending.pop(_tt_last_state, None)
+
     ck = (pending or {}).get("client_key") or os.environ.get("TIKTOK_CLIENT_KEY", "").strip()
     cs = (pending or {}).get("client_secret") or os.environ.get("TIKTOK_CLIENT_SECRET", "").strip()
-    redirect_uri = (pending or {}).get("redirect_uri") or "http://127.0.0.1:8765/tiktok/callback"
-    handle = (pending or {}).get("handle_hint") or "@clipcurrent1000"
+    redirect_uri = (
+        (redirect_uri_override or "").strip()
+        or (pending or {}).get("redirect_uri")
+        or os.environ.get("TIKTOK_REDIRECT_URI", "").strip()
+        or "https://github.com/Umair-Zahid2510/clipper"
+    )
+    code_verifier = (pending or {}).get("code_verifier") or ""
+    handle = (handle_override or "").strip() or (pending or {}).get("handle_hint") or "@clipcurrent1000"
+
+    token_payload = {
+        "client_key": ck,
+        "client_secret": cs,
+        "code": extracted_code,
+        "grant_type": "authorization_code",
+        "redirect_uri": redirect_uri,
+    }
+    if code_verifier:
+        token_payload["code_verifier"] = code_verifier
 
     resp = requests.post(
         "https://open.tiktokapis.com/v2/oauth/token/",
         headers={"Content-Type": "application/x-www-form-urlencoded"},
-        data={
-            "client_key": ck,
-            "client_secret": cs,
-            "code": code,
-            "grant_type": "authorization_code",
-            "redirect_uri": redirect_uri,
-        },
+        data=token_payload,
         timeout=30,
     )
     data = resp.json() if resp.content else {}
     access_token = data.get("access_token")
+    if (resp.status_code >= 400 or not access_token) and code_verifier:
+        # Retry once without code_verifier in case the TikTok app platform is Web-only
+        token_payload.pop("code_verifier", None)
+        resp = requests.post(
+            "https://open.tiktokapis.com/v2/oauth/token/",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            data=token_payload,
+            timeout=30,
+        )
+        data = resp.json() if resp.content else {}
+        access_token = data.get("access_token")
+
     if resp.status_code >= 400 or not access_token:
         err_msg = data.get("error_description") or data.get("message") or data.get("error") or f"HTTP {resp.status_code}"
         raise RuntimeError(f"TikTok OAuth token exchange failed: {err_msg}")
@@ -370,6 +455,7 @@ def all_accounts_status() -> dict:
         "tiktok": {
             **_fmt_plat("tiktok"),
             "client_key_set": bool(os.environ.get("TIKTOK_CLIENT_KEY", "").strip()),
+            "redirect_uri": os.environ.get("TIKTOK_REDIRECT_URI", "https://github.com/Umair-Zahid2510/clipper").strip(),
         },
         "instagram": _fmt_plat("instagram"),
     }

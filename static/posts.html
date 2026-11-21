@@ -246,13 +246,13 @@
       <div class="wiz-pane" data-wiz-pane="tiktok" hidden>
         <div class="wiz-grid">
           <div class="guide-box">
-            <h3>Connect TikTok (<code>@clipcurrent1000</code>) — 1-Click OAuth or Direct Token</h3>
+            <h3>Connect TikTok (<code>@clipcurrent1000</code>) — PKCE OAuth v2 + Auto-Refresh</h3>
             <ol>
-              <li>In <a href="https://developers.tiktok.com/" target="_blank" rel="noopener">TikTok Developer Portal</a> → create an App or <b>Sandbox</b> and add <b>Login Kit</b> + <b>Content Posting API</b> (<code>video.publish</code>, <code>video.upload</code>).</li>
-              <li>Under <b>Login Kit → Redirect URI</b>, add: <code>http://127.0.0.1:8765/tiktok/callback</code></li>
-              <li>Under <b>Sandbox → Target Users</b>, add <code>@clipcurrent1000</code> and accept the invite in the TikTok mobile app.</li>
-              <li><b>Option A (Built-in 1-Click OAuth):</b> Paste your <b>Client Key</b> &amp; <b>Client Secret</b> on the right → click <b>1. Save TikTok Client Key &amp; Secret</b> → click <b>2. + Authorize TikTok in Browser</b> (no external script needed, auto-refreshes every 24h!).</li>
-              <li><b>Option B (Manual Token Paste):</b> Or paste an existing <code>Access Token</code> / <code>Refresh Token</code> directly below.</li>
+              <li>In <a href="https://developers.tiktok.com/" target="_blank" rel="noopener">TikTok Developer Portal</a> → enable <b>Login Kit</b> + <b>Content Posting API</b> (<code>video.publish</code>, <code>video.upload</code>).</li>
+              <li>Under <b>Login Kit → Redirect URI</b>, keep your HTTPS URI: <code>https://github.com/Umair-Zahid2510/clipper</code></li>
+              <li>Paste your <b>Client Key</b> &amp; <b>Client Secret</b> on the right → click <b>1. Save TikTok Client Key &amp; Secret</b>.</li>
+              <li>Click <b>2. + Authorize TikTok in Browser (PKCE S256)</b> and approve access for <code>@clipcurrent1000</code>.</li>
+              <li>When TikTok redirects your browser to <code>https://github.com/Umair-Zahid2510/clipper?code=...</code>, copy that full URL from your browser address bar, paste it into <b>Step 3</b> on the right, and click <b>3. Exchange Redirect URL for Tokens</b>!</li>
             </ol>
           </div>
           <div class="form-box">
@@ -266,9 +266,20 @@
                 <input type="password" id="ttClientSecret" placeholder="your_sandbox_client_secret">
               </div>
             </div>
+            <div>
+              <label class="lbl">TikTok Login Kit Redirect URI (must match TikTok Portal exactly)</label>
+              <input type="text" id="ttRedirectUri" value="https://github.com/Umair-Zahid2510/clipper" placeholder="https://github.com/Umair-Zahid2510/clipper">
+            </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding-bottom:8px;border-bottom:1px solid var(--line)">
               <button type="button" class="ghost" id="saveTtCredsBtn">1. Save TikTok Client Key &amp; Secret</button>
-              <a class="go" id="connectTtOauthBtn" href="/api/tiktok/connect?handle=@clipcurrent1000" style="display:inline-flex;align-items:center;text-decoration:none">2. + Authorize TikTok in Browser (OAuth)</a>
+              <a class="go" id="connectTtOauthBtn" href="/api/tiktok/connect?handle=@clipcurrent1000&redirect_uri=https%3A%2F%2Fgithub.com%2FUmair-Zahid2510%2Fclipper" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;text-decoration:none">2. + Authorize TikTok in Browser (PKCE)</a>
+            </div>
+            <div style="padding-bottom:8px;border-bottom:1px solid var(--line);display:grid;gap:8px">
+              <label class="lbl">Step 3: Paste Redirected URL (<code>https://github.com/Umair-Zahid2510/clipper?code=...</code>) or Code</label>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <input type="text" id="ttRedirectedUrl" placeholder="Paste https://github.com/Umair-Zahid2510/clipper?code=...&state=... here" style="flex:1">
+                <button type="button" class="go" id="exchangeTtCodeBtn">3. Exchange URL for Tokens</button>
+              </div>
             </div>
             <div class="form-row">
               <div>
@@ -277,16 +288,16 @@
               </div>
               <div>
                 <label class="lbl">Open ID (optional)</label>
-                <input type="text" id="ttOpenId" placeholder="open_id (auto-filled by OAuth)">
+                <input type="text" id="ttOpenId" placeholder="open_id (auto-filled by Step 3)">
               </div>
             </div>
             <div class="form-row">
               <div>
-                <label class="lbl">TikTok Access Token (<code>act.xxx</code>)</label>
+                <label class="lbl">Manual Access Token (<code>act.xxx</code>)</label>
                 <input type="password" id="ttAccessToken" placeholder="act.example_tiktok_access_token...">
               </div>
               <div>
-                <label class="lbl">Refresh Token (<code>rft.xxx</code> — auto-renews 24h token)</label>
+                <label class="lbl">Manual Refresh Token (<code>rft.xxx</code>)</label>
                 <input type="password" id="ttRefreshToken" placeholder="rft.optional...">
               </div>
             </div>
@@ -517,9 +528,19 @@ $("#saveYtCredsBtn").addEventListener("click", async () => {
   }
 });
 
+function updateTtConnectHref() {
+  const h = encodeURIComponent($("#ttTitle")?.value.trim() || "@clipcurrent1000");
+  const r = encodeURIComponent($("#ttRedirectUri")?.value.trim() || "https://github.com/Umair-Zahid2510/clipper");
+  const btn = $("#connectTtOauthBtn");
+  if (btn) btn.href = `/api/tiktok/connect?handle=${h}&redirect_uri=${r}`;
+}
+$("#ttTitle")?.addEventListener("input", updateTtConnectHref);
+$("#ttRedirectUri")?.addEventListener("input", updateTtConnectHref);
+
 $("#saveTtCredsBtn").addEventListener("click", async () => {
   const client_key = $("#ttClientKey").value.trim();
   const client_secret = $("#ttClientSecret").value.trim();
+  const redirect_uri = $("#ttRedirectUri").value.trim() || "https://github.com/Umair-Zahid2510/clipper";
   if (!client_key || !client_secret) {
     showWizMsg("Enter both TIKTOK_CLIENT_KEY and TIKTOK_CLIENT_SECRET.", true);
     return;
@@ -528,11 +549,35 @@ $("#saveTtCredsBtn").addEventListener("click", async () => {
     await api("/api/socials/tiktok-credentials", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ client_key, client_secret }),
+      body: JSON.stringify({ client_key, client_secret, redirect_uri }),
     });
-    const h = encodeURIComponent($("#ttTitle").value.trim() || "@clipcurrent1000");
-    $("#connectTtOauthBtn").href = `/api/tiktok/connect?handle=${h}`;
-    showWizMsg("Saved TikTok Client Key & Secret to .env! Now click '2. + Authorize TikTok in Browser (OAuth)'.");
+    updateTtConnectHref();
+    showWizMsg("Saved TikTok Client Key, Secret & Redirect URI! Now click '2. + Authorize TikTok in Browser (PKCE)'.");
+    lastStructSig = "";
+    await refresh();
+  } catch (e) {
+    showWizMsg(e.message, true);
+  }
+});
+
+$("#exchangeTtCodeBtn").addEventListener("click", async () => {
+  const code_or_url = $("#ttRedirectedUrl").value.trim();
+  if (!code_or_url) {
+    showWizMsg("Paste the redirected URL (https://github.com/Umair-Zahid2510/clipper?code=...) into Step 3 first.", true);
+    return;
+  }
+  try {
+    await api("/api/socials/tiktok/exchange", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        code_or_url,
+        handle: $("#ttTitle").value.trim() || "@clipcurrent1000",
+        redirect_uri: $("#ttRedirectUri").value.trim() || "https://github.com/Umair-Zahid2510/clipper",
+      }),
+    });
+    $("#ttRedirectedUrl").value = "";
+    showWizMsg("TikTok account @clipcurrent1000 connected via PKCE OAuth (with 24h auto-refresh)!");
     lastStructSig = "";
     await refresh();
   } catch (e) {

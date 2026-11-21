@@ -843,6 +843,13 @@ class YouTubeCredentialsRequest(BaseModel):
 class TikTokCredentialsRequest(BaseModel):
     client_key: str
     client_secret: str
+    redirect_uri: str | None = None
+
+
+class TikTokExchangeCodeRequest(BaseModel):
+    code_or_url: str
+    handle: str = "@clipcurrent1000"
+    redirect_uri: str | None = None
 
 
 class AddSocialAccountRequest(BaseModel):
@@ -1021,19 +1028,35 @@ def save_yt_credentials(req: YouTubeCredentialsRequest) -> dict:
 @app.post("/api/socials/tiktok-credentials")
 def save_tt_credentials(req: TikTokCredentialsRequest) -> dict:
     try:
-        return socials.save_tiktok_client_credentials(req.client_key, req.client_secret)
+        return socials.save_tiktok_client_credentials(req.client_key, req.client_secret, req.redirect_uri)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from None
 
 
 @app.get("/api/tiktok/connect")
-def tiktok_connect(request: Request, handle: str = "@clipcurrent1000") -> RedirectResponse:
-    redirect_uri = f"{str(request.base_url).rstrip('/')}/tiktok/callback"
+def tiktok_connect(
+    request: Request,
+    handle: str = "@clipcurrent1000",
+    redirect_uri: str | None = None,
+) -> RedirectResponse:
     try:
-        url = socials.start_tiktok_auth(redirect_uri, handle_hint=handle)
+        url = socials.start_tiktok_auth(redirect_uri=redirect_uri, handle_hint=handle)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from None
     return RedirectResponse(url, status_code=307)
+
+
+@app.post("/api/socials/tiktok/exchange")
+def tiktok_exchange_redirect_url(req: TikTokExchangeCodeRequest) -> dict:
+    try:
+        return socials.finish_tiktok_auth(
+            state=None,
+            code_or_url=req.code_or_url,
+            handle_override=req.handle,
+            redirect_uri_override=req.redirect_uri,
+        )
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc)) from None
 
 
 @app.get("/tiktok/callback")
