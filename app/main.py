@@ -1700,7 +1700,7 @@ def _sequential_loop_worker() -> None:
                 if rotated_to:
                     continue
 
-                backoff_s = min(60, 5 * (2 ** (attempts - 1)))
+                backoff_s = min(60, 20 * attempts) if "rate limit" in err_msg.lower() else min(60, 5 * (2 ** (attempts - 1)))
                 enriched_err = {
                     "status": "error",
                     "error": err_msg,
