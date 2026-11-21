@@ -850,7 +850,7 @@ function renderList() {
 
     return `
     <li class="item ${ap === "approved" ? "is-approved" : ap === "rejected" ? "is-rejected" : ""}" data-key="${esc(it.key)}">
-      <video src="${esc(it.video)}" controls preload="metadata" playsinline></video>
+      <video src="${esc(it.video)}#t=1.0" controls preload="metadata" playsinline></video>
       <div class="item-body">
         <div class="item-top">
           <div class="pills">

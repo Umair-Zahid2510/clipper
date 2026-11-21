@@ -264,10 +264,13 @@ def _build_cliffhanger_and_captions_ass(
     srt_path: Path,
     cliffhanger_text: str | None = None,
     cliffhanger_duration: float = 4.0,
+    caption_style: str = "bw",
 ) -> str:
     """Build an ASS script containing BOTH the white-background black-text cliffhanger hook banner
-    at the top of the video AND the bottom word-grouped subtitles."""
-    head = """[Script Info]
+    at the top of the video AND the bottom word-grouped subtitles (white B&W by default)."""
+    # ASS colour format is &HAABBGGRR (White = &H00FFFFFF, Yellow = &H0000FFFF)
+    cap_color = "&H0000FFFF" if caption_style == "yellow" else "&H00FFFFFF"
+    head = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
 PlayResY: 1920
@@ -276,8 +279,8 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Cap,Arial Black,68,&H0000FFFF,&H0000FFFF,&H00000000,&H96000000,-1,0,0,0,100,100,0,0,1,5,2,2,70,70,220,1
-Style: CliffBox,Arial Black,50,&H000A0A0A,&H000A0A0A,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,22,0,8,85,85,235,1
+Style: Cap,Arial Black,68,{cap_color},{cap_color},&H00000000,&H96000000,-1,0,0,0,100,100,0,0,1,5,2,2,70,70,340,1
+Style: CliffBox,Arial Black,48,&H000A0A0A,&H000A0A0A,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,22,0,8,75,75,310,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -285,9 +288,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     events: list[str] = []
     if cliffhanger_text:
         clean_hook = _esc_ass(cliffhanger_text.strip().upper())
+        # Render immediately at frame 0 (no fade-in delay) so even t=0.0s shows the solid white box
         events.append(
-            f"Dialogue: 2,{_ass_time(0.0)},{_ass_time(max(2.0, cliffhanger_duration))},CliffBox,,0,0,0,,"
-            f"{{\\fad(120,220)}}{clean_hook}"
+            f"Dialogue: 2,{_ass_time(0.0)},{_ass_time(max(4.0, cliffhanger_duration))},CliffBox,,0,0,0,,"
+            f"{clean_hook}"
         )
 
     if srt_path.is_file():
@@ -320,7 +324,8 @@ def burn_captions(
     srt_path: Path,
     out_path: Path,
     cliffhanger_text: str | None = None,
-    cliffhanger_duration: float = 4.0,
+    cliffhanger_duration: float = 30.0,
+    caption_style: str = "bw",
 ) -> Path:
     """Burn white-box cliffhanger hook text + bold short-form captions into video_path using ffmpeg."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -330,7 +335,10 @@ def burn_captions(
         has_cues = (srt_path.exists() and bool(srt_path.read_text(encoding="utf-8").strip())) or bool(cliffhanger_text)
         if has_cues:
             ass_content = _build_cliffhanger_and_captions_ass(
-                srt_path, cliffhanger_text=cliffhanger_text, cliffhanger_duration=cliffhanger_duration
+                srt_path,
+                cliffhanger_text=cliffhanger_text,
+                cliffhanger_duration=cliffhanger_duration,
+                caption_style=caption_style,
             )
             ass_path.write_text(ass_content, encoding="utf-8")
             cmd = [
@@ -375,13 +383,15 @@ def caption_clip(
     rules = campaign_rules or {}
     use_cliff = bool(rules.get("cliffhanger_enabled", cliffhanger_enabled))
     banner_txt = meta.get("cliffhanger_text") if use_cliff else None
-    banner_dur = float(rules.get("cliffhanger_duration", 4.0))
+    banner_dur = float(rules.get("cliffhanger_duration", 30.0))
+    cap_style = (rules.get("caption_style") or "bw").strip().lower()
     burn_captions(
         video_path,
         srt_target,
         out_path,
         cliffhanger_text=banner_txt,
         cliffhanger_duration=banner_dur,
+        caption_style=cap_style,
     )
     meta_path = out_path.with_suffix(".json")
     if not meta_path.exists():

@@ -151,7 +151,7 @@ def evaluate_campaign_compliance(
             "campaign_name": "General Mode",
         }
     desc_low = (description or "").lower()
-    req_cta = (rules.get("required_cta") or "watch kreekcraft on youtube and twitch").strip()
+    req_cta = (rules.get("required_cta") if "required_cta" in rules else "watch kreekcraft on youtube and twitch").strip()
     # Compare core CTA words (strip trailing emojis/punctuation)
     core_cta = re.sub(r"[^\w\s]+$", "", req_cta).strip().lower()
     cta_ok = (not core_cta) or (core_cta in desc_low)

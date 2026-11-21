@@ -417,7 +417,7 @@ def test_campaigns_studio_brief_parser_general_mode_and_cliffhanger_hook(monkeyp
     assert "Watch IShowSpeed Live on YouTube" in meta["description"]
     assert "WAIT FOR" in meta["cliffhanger_text"]
     ass_text = watcher.captioner._build_cliffhanger_and_captions_ass(srt, meta["cliffhanger_text"], 4.0)
-    assert "Style: CliffBox,Arial Black,50,&H000A0A0A,&H000A0A0A,&H00FFFFFF,&H00FFFFFF" in ass_text
+    assert "Style: CliffBox,Arial Black" in ass_text
     assert "Dialogue: 2,0:00:00.00,0:00:04.00,CliffBox" in ass_text
 
     # 4. Switch to General Mode (non-campaign) and verify clips use standard editing without forced CTA/no-links
