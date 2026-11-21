@@ -529,7 +529,7 @@ function renderClips(clips) {
     const postLabel = y && y.status === "done" ? "Post again" : y && y.status === "error" ? "Retry YouTube" : "Post to YouTube";
     return `
     <li class="clip">
-      <video src="${esc(c.video)}#t=1.0" controls preload="metadata" playsinline></video>
+      <video src="${esc(c.video)}#t=1.0" controls preload="none" playsinline></video>
       <div class="clip-info">
         <div class="pills">
           <span class="pill">${esc(c.name)}</span>

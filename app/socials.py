@@ -79,6 +79,161 @@ def save_youtube_client_credentials(client_id: str, client_secret: str) -> dict:
     return all_accounts_status()
 
 
+def save_tiktok_client_credentials(client_key: str, client_secret: str) -> dict:
+    """Save TIKTOK_CLIENT_KEY and TIKTOK_CLIENT_SECRET to .env and activate immediately in memory."""
+    ck = (client_key or "").strip()
+    cs = (client_secret or "").strip()
+    if not ck or not cs:
+        raise ValueError("Both TikTok Client Key and Client Secret are required.")
+
+    os.environ["TIKTOK_CLIENT_KEY"] = ck
+    os.environ["TIKTOK_CLIENT_SECRET"] = cs
+
+    env_path = config.ROOT / ".env"
+    lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.is_file() else []
+    out_lines: list[str] = []
+    seen_k = seen_s = False
+    for line in lines:
+        if re.match(r"^\s*#?\s*TIKTOK_CLIENT_KEY\s*=", line):
+            out_lines.append(f"TIKTOK_CLIENT_KEY={ck}")
+            seen_k = True
+        elif re.match(r"^\s*#?\s*TIKTOK_CLIENT_SECRET\s*=", line):
+            out_lines.append(f"TIKTOK_CLIENT_SECRET={cs}")
+            seen_s = True
+        else:
+            out_lines.append(line)
+    if not seen_k:
+        out_lines.append(f"TIKTOK_CLIENT_KEY={ck}")
+    if not seen_s:
+        out_lines.append(f"TIKTOK_CLIENT_SECRET={cs}")
+    env_path.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
+    return all_accounts_status()
+
+
+_tt_pending: dict[str, dict] = {}
+
+
+def start_tiktok_auth(redirect_uri: str, handle_hint: str = "@clipcurrent1000") -> str:
+    """Build the TikTok OAuth v2 authorization URL for 1-click browser login."""
+    from urllib.parse import urlencode
+
+    ck = os.environ.get("TIKTOK_CLIENT_KEY", "").strip()
+    cs = os.environ.get("TIKTOK_CLIENT_SECRET", "").strip()
+    if not ck or not cs:
+        raise ValueError("Save your TikTok Sandbox/App Client Key & Client Secret first.")
+    state = f"tt_{uuid.uuid4().hex[:18]}"
+    _tt_pending[state] = {
+        "client_key": ck,
+        "client_secret": cs,
+        "redirect_uri": redirect_uri,
+        "handle_hint": (handle_hint or "@clipcurrent1000").strip(),
+        "created": time.time(),
+    }
+    params = {
+        "client_key": ck,
+        "scope": "user.info.basic,video.publish,video.upload",
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "state": state,
+    }
+    return f"https://www.tiktok.com/v2/auth/authorize/?{urlencode(params)}"
+
+
+def finish_tiktok_auth(state: str, code: str) -> dict:
+    """Exchange TikTok authorization code for access_token, refresh_token, open_id, and save account."""
+    pending = _tt_pending.pop(state, None)
+    ck = (pending or {}).get("client_key") or os.environ.get("TIKTOK_CLIENT_KEY", "").strip()
+    cs = (pending or {}).get("client_secret") or os.environ.get("TIKTOK_CLIENT_SECRET", "").strip()
+    redirect_uri = (pending or {}).get("redirect_uri") or "http://127.0.0.1:8765/tiktok/callback"
+    handle = (pending or {}).get("handle_hint") or "@clipcurrent1000"
+
+    resp = requests.post(
+        "https://open.tiktokapis.com/v2/oauth/token/",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        data={
+            "client_key": ck,
+            "client_secret": cs,
+            "code": code,
+            "grant_type": "authorization_code",
+            "redirect_uri": redirect_uri,
+        },
+        timeout=30,
+    )
+    data = resp.json() if resp.content else {}
+    access_token = data.get("access_token")
+    if resp.status_code >= 400 or not access_token:
+        err_msg = data.get("error_description") or data.get("message") or data.get("error") or f"HTTP {resp.status_code}"
+        raise RuntimeError(f"TikTok OAuth token exchange failed: {err_msg}")
+
+    # Try fetching display_name/username from user.info.basic if available
+    try:
+        u_resp = requests.get(
+            "https://open.tiktokapis.com/v2/user/info/",
+            params={"fields": "open_id,display_name,username"},
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=15,
+        )
+        u_data = ((u_resp.json() if u_resp.content else {}).get("data") or {}).get("user") or {}
+        uname = u_data.get("username") or u_data.get("display_name")
+        if uname:
+            handle = f"@{uname.lstrip('@')}"
+    except Exception:
+        pass
+
+    return add_social_account(
+        platform="tiktok",
+        title=handle,
+        access_token=access_token,
+        open_id=data.get("open_id"),
+        refresh_token=data.get("refresh_token"),
+        client_key=ck,
+        client_secret=cs,
+    )
+
+
+def refresh_tiktok_account_token(account_id: str | None = None) -> dict:
+    """Automatically refresh a 24-hour TikTok access_token using its stored refresh_token."""
+    store = _read_social_store()
+    aid = account_id or store["tiktok"].get("active_id")
+    acc = (store["tiktok"]["accounts"].get(aid) if aid else None)
+    if not acc:
+        raise RuntimeError("TikTok account not found.")
+    rft = (acc.get("refresh_token") or "").strip()
+    ck = (acc.get("client_key") or os.environ.get("TIKTOK_CLIENT_KEY", "")).strip()
+    cs = (acc.get("client_secret") or os.environ.get("TIKTOK_CLIENT_SECRET", "")).strip()
+    if not rft or not ck or not cs:
+        raise RuntimeError("Cannot auto-refresh TikTok token: save Refresh Token, Client Key, and Client Secret in TikTok Setup.")
+
+    resp = requests.post(
+        "https://open.tiktokapis.com/v2/oauth/token/",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        data={
+            "client_key": ck,
+            "client_secret": cs,
+            "grant_type": "refresh_token",
+            "refresh_token": rft,
+        },
+        timeout=30,
+    )
+    data = resp.json() if resp.content else {}
+    new_tok = data.get("access_token")
+    if resp.status_code >= 400 or not new_tok:
+        err_msg = data.get("error_description") or data.get("error") or f"HTTP {resp.status_code}"
+        raise RuntimeError(f"TikTok token refresh failed: {err_msg}")
+
+    acc["access_token"] = new_tok
+    if data.get("refresh_token"):
+        acc["refresh_token"] = data["refresh_token"]
+    if data.get("open_id"):
+        acc["open_id"] = data["open_id"]
+    acc["client_key"] = ck
+    acc["client_secret"] = cs
+    acc["refreshed_at"] = time.time()
+    store["tiktok"]["accounts"][aid] = acc
+    _write_social_store(store)
+    return acc
+
+
 def add_social_account(
     platform: str,
     title: str,
@@ -212,7 +367,10 @@ def all_accounts_status() -> dict:
             "accounts": yt_acc["accounts"],
             "client_id_set": bool(os.environ.get("YOUTUBE_CLIENT_ID", "").strip()),
         },
-        "tiktok": _fmt_plat("tiktok"),
+        "tiktok": {
+            **_fmt_plat("tiktok"),
+            "client_key_set": bool(os.environ.get("TIKTOK_CLIENT_KEY", "").strip()),
+        },
         "instagram": _fmt_plat("instagram"),
     }
 
@@ -365,10 +523,18 @@ def upload_to_tiktok(
     account_id: str | None = None,
     progress: Callable[[int], None] | None = None,
 ) -> dict:
-    """Upload MP4 directly to TikTok via Content Posting API v2 (FILE_UPLOAD)."""
+    """Upload MP4 directly to TikTok via Content Posting API v2 (FILE_UPLOAD) with automatic 24h token refresh and Sandbox SELF_ONLY fallback."""
     acc = get_account_credentials("tiktok", account_id)
     if not acc or not acc.get("access_token"):
         raise RuntimeError("TikTok account not connected. Add your TikTok Access Token in Social Setup first.")
+
+    # Proactively auto-refresh if token is > 23 hours old and refresh_token is stored
+    age = time.time() - float(acc.get("refreshed_at") or acc.get("created") or 0)
+    if age > 23 * 3600 and acc.get("refresh_token") and (acc.get("client_key") or os.environ.get("TIKTOK_CLIENT_KEY")):
+        try:
+            acc = refresh_tiktok_account_token(acc.get("id"))
+        except Exception:
+            pass
 
     size = video_path.stat().st_size
     body = json.loads(json.dumps(payload["body"]))
@@ -385,18 +551,40 @@ def upload_to_tiktok(
     )
     if progress:
         progress(10)
-    resp = requests.post(
-        init_url,
-        headers={
-            "Authorization": f"Bearer {acc['access_token']}",
-            "Content-Type": "application/json; charset=UTF-8",
-        },
-        json=body,
-        timeout=30,
-    )
-    data = resp.json() if resp.content else {}
+
+    def _call_init(token: str, req_body: dict):
+        r = requests.post(
+            init_url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json; charset=UTF-8",
+            },
+            json=req_body,
+            timeout=30,
+        )
+        d = r.json() if r.content else {}
+        return r, d
+
+    resp, data = _call_init(acc["access_token"], body)
     err = data.get("error") or {}
-    if resp.status_code >= 400 or (err.get("code") and err.get("code") != "ok"):
+    err_code = str(err.get("code") or "").lower()
+
+    # 1. If 401 / access_token_invalid, automatically refresh token and retry once
+    if (resp.status_code == 401 or "token" in err_code) and acc.get("refresh_token"):
+        acc = refresh_tiktok_account_token(acc.get("id"))
+        resp, data = _call_init(acc["access_token"], body)
+        err = data.get("error") or {}
+        err_code = str(err.get("code") or "").lower()
+
+    # 2. If TikTok Sandbox / Unaudited app rejects PUBLIC_TO_EVERYONE, automatically fall back to SELF_ONLY
+    if (resp.status_code >= 400 or (err_code and err_code != "ok")) and ("unaudited" in err_code or "privacy" in err_code or "unaudited" in str(err.get("message", "")).lower()):
+        if body.get("post_info", {}).get("privacy_level") != "SELF_ONLY":
+            body.setdefault("post_info", {})["privacy_level"] = "SELF_ONLY"
+            resp, data = _call_init(acc["access_token"], body)
+            err = data.get("error") or {}
+            err_code = str(err.get("code") or "").lower()
+
+    if resp.status_code >= 400 or (err_code and err_code != "ok"):
         msg = err.get("message") or data.get("message") or f"HTTP {resp.status_code}"
         raise RuntimeError(f"TikTok API rejected init: {msg}")
 

@@ -840,6 +840,11 @@ class YouTubeCredentialsRequest(BaseModel):
     client_secret: str
 
 
+class TikTokCredentialsRequest(BaseModel):
+    client_key: str
+    client_secret: str
+
+
 class AddSocialAccountRequest(BaseModel):
     platform: str  # "tiktok" or "instagram"
     title: str
@@ -1010,6 +1015,44 @@ def save_yt_credentials(req: YouTubeCredentialsRequest) -> dict:
     try:
         return socials.save_youtube_client_credentials(req.client_id, req.client_secret)
     except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.post("/api/socials/tiktok-credentials")
+def save_tt_credentials(req: TikTokCredentialsRequest) -> dict:
+    try:
+        return socials.save_tiktok_client_credentials(req.client_key, req.client_secret)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/tiktok/connect")
+def tiktok_connect(request: Request, handle: str = "@clipcurrent1000") -> RedirectResponse:
+    redirect_uri = f"{str(request.base_url).rstrip('/')}/tiktok/callback"
+    try:
+        url = socials.start_tiktok_auth(redirect_uri, handle_hint=handle)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return RedirectResponse(url, status_code=307)
+
+
+@app.get("/tiktok/callback")
+def tiktok_oauth_callback(state: str | None = None, code: str | None = None, error: str | None = None):
+    if error or not code:
+        return RedirectResponse("/posts?tiktok=error", status_code=303)
+    try:
+        socials.finish_tiktok_auth(state or "", code)
+    except Exception:
+        return RedirectResponse("/posts?tiktok=error", status_code=303)
+    return RedirectResponse("/posts?tiktok=connected", status_code=303)
+
+
+@app.post("/api/socials/tiktok/refresh")
+def refresh_tiktok_token_endpoint(account_id: str | None = None) -> dict:
+    try:
+        acc = socials.refresh_tiktok_account_token(account_id)
+        return {"ok": True, "account_id": acc.get("id"), "title": acc.get("title")}
+    except Exception as exc:
         raise HTTPException(400, str(exc)) from None
 
 

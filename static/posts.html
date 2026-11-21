@@ -246,41 +246,53 @@
       <div class="wiz-pane" data-wiz-pane="tiktok" hidden>
         <div class="wiz-grid">
           <div class="guide-box">
-            <h3>How to get your TikTok Content Posting API v2 Token</h3>
+            <h3>Connect TikTok (<code>@clipcurrent1000</code>) — 1-Click OAuth or Direct Token</h3>
             <ol>
-              <li>Open <a href="https://developers.tiktok.com/" target="_blank" rel="noopener">TikTok for Developers</a> → create an App and enable the <b>Content Posting API</b> product.</li>
-              <li>Request scopes <code>video.publish</code> (Direct Post) and <code>video.upload</code> (Inbox Draft).</li>
-              <li>Generate a User <b>Access Token</b> (`act.xxxx...`) via TikTok OAuth or Sandbox token generator.</li>
-              <li>Paste your account handle (e.g. <code>@kreekclips</code>) and <b>Access Token</b> on the right to post directly from this dashboard.</li>
+              <li>In <a href="https://developers.tiktok.com/" target="_blank" rel="noopener">TikTok Developer Portal</a> → create an App or <b>Sandbox</b> and add <b>Login Kit</b> + <b>Content Posting API</b> (<code>video.publish</code>, <code>video.upload</code>).</li>
+              <li>Under <b>Login Kit → Redirect URI</b>, add: <code>http://127.0.0.1:8765/tiktok/callback</code></li>
+              <li>Under <b>Sandbox → Target Users</b>, add <code>@clipcurrent1000</code> and accept the invite in the TikTok mobile app.</li>
+              <li><b>Option A (Built-in 1-Click OAuth):</b> Paste your <b>Client Key</b> &amp; <b>Client Secret</b> on the right → click <b>1. Save TikTok Client Key &amp; Secret</b> → click <b>2. + Authorize TikTok in Browser</b> (no external script needed, auto-refreshes every 24h!).</li>
+              <li><b>Option B (Manual Token Paste):</b> Or paste an existing <code>Access Token</code> / <code>Refresh Token</code> directly below.</li>
             </ol>
           </div>
           <div class="form-box">
             <div class="form-row">
               <div>
-                <label class="lbl">TikTok Account Handle / Label *</label>
-                <input type="text" id="ttTitle" placeholder="@kreekcraft_gta6">
+                <label class="lbl">TIKTOK_CLIENT_KEY (Sandbox / App)</label>
+                <input type="text" id="ttClientKey" placeholder="awxxxx_your_sandbox_client_key">
               </div>
               <div>
-                <label class="lbl">Open ID (optional)</label>
-                <input type="text" id="ttOpenId" placeholder="open_id (optional)">
+                <label class="lbl">TIKTOK_CLIENT_SECRET</label>
+                <input type="password" id="ttClientSecret" placeholder="your_sandbox_client_secret">
               </div>
             </div>
-            <div>
-              <label class="lbl">TikTok OAuth Access Token (`video.publish` / `video.upload`) *</label>
-              <input type="password" id="ttAccessToken" placeholder="act.example_tiktok_access_token...">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding-bottom:8px;border-bottom:1px solid var(--line)">
+              <button type="button" class="ghost" id="saveTtCredsBtn">1. Save TikTok Client Key &amp; Secret</button>
+              <a class="go" id="connectTtOauthBtn" href="/api/tiktok/connect?handle=@clipcurrent1000" style="display:inline-flex;align-items:center;text-decoration:none">2. + Authorize TikTok in Browser (OAuth)</a>
             </div>
             <div class="form-row">
               <div>
-                <label class="lbl">Refresh Token (optional)</label>
-                <input type="password" id="ttRefreshToken" placeholder="rft.optional...">
+                <label class="lbl">TikTok Account Handle / Label *</label>
+                <input type="text" id="ttTitle" value="@clipcurrent1000" placeholder="@clipcurrent1000">
               </div>
               <div>
-                <label class="lbl">Client Key (optional)</label>
-                <input type="text" id="ttClientKey" placeholder="awoptional...">
+                <label class="lbl">Open ID (optional)</label>
+                <input type="text" id="ttOpenId" placeholder="open_id (auto-filled by OAuth)">
               </div>
             </div>
-            <div>
-              <button type="button" class="go" id="saveTtAccBtn">+ Save &amp; Connect TikTok Account</button>
+            <div class="form-row">
+              <div>
+                <label class="lbl">TikTok Access Token (<code>act.xxx</code>)</label>
+                <input type="password" id="ttAccessToken" placeholder="act.example_tiktok_access_token...">
+              </div>
+              <div>
+                <label class="lbl">Refresh Token (<code>rft.xxx</code> — auto-renews 24h token)</label>
+                <input type="password" id="ttRefreshToken" placeholder="rft.optional...">
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button type="button" class="ghost" id="saveTtAccBtn">+ Save Manual TikTok Token</button>
+              <button type="button" class="ghost" id="refreshTtTokenBtn">↻ Refresh 24h TikTok Token Now</button>
             </div>
             <div>
               <label class="lbl">Connected TikTok Accounts</label>
@@ -505,6 +517,39 @@ $("#saveYtCredsBtn").addEventListener("click", async () => {
   }
 });
 
+$("#saveTtCredsBtn").addEventListener("click", async () => {
+  const client_key = $("#ttClientKey").value.trim();
+  const client_secret = $("#ttClientSecret").value.trim();
+  if (!client_key || !client_secret) {
+    showWizMsg("Enter both TIKTOK_CLIENT_KEY and TIKTOK_CLIENT_SECRET.", true);
+    return;
+  }
+  try {
+    await api("/api/socials/tiktok-credentials", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_key, client_secret }),
+    });
+    const h = encodeURIComponent($("#ttTitle").value.trim() || "@clipcurrent1000");
+    $("#connectTtOauthBtn").href = `/api/tiktok/connect?handle=${h}`;
+    showWizMsg("Saved TikTok Client Key & Secret to .env! Now click '2. + Authorize TikTok in Browser (OAuth)'.");
+    lastStructSig = "";
+    await refresh();
+  } catch (e) {
+    showWizMsg(e.message, true);
+  }
+});
+
+$("#refreshTtTokenBtn").addEventListener("click", async () => {
+  try {
+    const res = await api("/api/socials/tiktok/refresh", { method: "POST" });
+    showWizMsg(`Refreshed 24h TikTok token for ${res.title || "account"}!`);
+    await refresh();
+  } catch (e) {
+    showWizMsg(e.message, true);
+  }
+});
+
 $("#saveTtAccBtn").addEventListener("click", async () => {
   try {
     await api("/api/socials/accounts", {
@@ -517,6 +562,7 @@ $("#saveTtAccBtn").addEventListener("click", async () => {
         access_token: $("#ttAccessToken").value.trim(),
         refresh_token: $("#ttRefreshToken").value.trim(),
         client_key: $("#ttClientKey").value.trim(),
+        client_secret: $("#ttClientSecret").value.trim(),
       }),
     });
     $("#ttAccessToken").value = "";
@@ -850,7 +896,7 @@ function renderList() {
 
     return `
     <li class="item ${ap === "approved" ? "is-approved" : ap === "rejected" ? "is-rejected" : ""}" data-key="${esc(it.key)}">
-      <video src="${esc(it.video)}#t=1.0" controls preload="metadata" playsinline></video>
+      <video src="${esc(it.video)}#t=1.0" controls preload="none" playsinline></video>
       <div class="item-body">
         <div class="item-top">
           <div class="pills">
