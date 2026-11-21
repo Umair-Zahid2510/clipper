@@ -26,12 +26,31 @@ def _normalize_target_url(target: str) -> str:
 
 
 def resolve_stream_url(target: str) -> str | None:
-    """Resolve the live HLS/manifest URL for a Twitch or YouTube Live stream, or None if offline."""
+    """Resolve the live HLS/manifest URL for an active Twitch or YouTube Live stream, or None if offline/VOD."""
     url = _normalize_target_url(target)
     if not url:
         return None
 
-    # 1. Try streamlink first (works for both Twitch and YouTube Live)
+    # 1. For YouTube URLs, check live_status first so an ended stream archive (VOD) is handled by the Parallel Catch-Up Agent instead of live segmented recording
+    if "youtube.com" in url.lower() or "youtu.be" in url.lower():
+        try:
+            import yt_dlp
+
+            opts = {"quiet": True, "no_warnings": True, "noplaylist": True, "format": "best"}
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                if info.get("entries"):
+                    entries = [e for e in info["entries"] if e]
+                    info = entries[0] if entries else {}
+                if not (info.get("is_live") or info.get("live_status") == "is_live"):
+                    return None
+                direct = info.get("url") or info.get("manifest_url")
+                if direct and str(direct).startswith("http"):
+                    return str(direct)
+        except Exception:
+            pass
+
+    # 2. Try streamlink (Twitch Live and YouTube Live fallback)
     try:
         proc = subprocess.run(
             [sys.executable, "-m", "streamlink", "--stream-url", url, "best"],
@@ -43,24 +62,6 @@ def resolve_stream_url(target: str) -> str | None:
                 return stream_url
     except Exception:
         pass
-
-    # 2. Fallback to yt-dlp for YouTube Live URLs / channel streams pages
-    if "youtube.com" in url.lower() or "youtu.be" in url.lower():
-        try:
-            import yt_dlp
-
-            opts = {"quiet": True, "no_warnings": True, "noplaylist": True, "format": "best"}
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                if info.get("entries"):
-                    entries = [e for e in info["entries"] if e]
-                    info = entries[0] if entries else {}
-                if info.get("is_live") or info.get("live_status") == "is_live":
-                    direct = info.get("url") or info.get("manifest_url")
-                    if direct and str(direct).startswith("http"):
-                        return str(direct)
-        except Exception:
-            pass
     return None
 
 

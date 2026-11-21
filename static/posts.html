@@ -431,7 +431,10 @@
         <button type="button" class="tab" data-filter="error">Failed / Quota <span id="fCountErr"></span></button>
         <button type="button" class="tab" data-filter="rejected">✗ Rejected <span id="fCountRej"></span></button>
       </div>
-      <span id="showingCount" style="color:var(--muted);font:500 13px var(--f-mono)">0 clips</span>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <button type="button" class="ghost" id="clearLiveClipsBtn" style="min-height:32px;padding:0 11px;font-size:12px">🗑 Clear Unposted Live Clips</button>
+        <span id="showingCount" style="color:var(--muted);font:500 13px var(--f-mono)">0 clips</span>
+      </div>
     </div>
 
     <ul class="list" id="list"></ul>
@@ -1016,6 +1019,7 @@ function renderList() {
           <button type="button" class="ghost" data-act="post-active" data-plat="${esc(activePlat)}" ${busy ? "disabled" : ""}>Post to ${activePlat === "youtube" ? "YouTube" : activePlat === "tiktok" ? "TikTok" : "Instagram"} Only</button>
           <button type="button" class="go" data-act="post-selected" ${busy ? "disabled" : ""}>🚀 Post to Checked Socials (${tPlats.join(" + ")})</button>
           <a class="ghost" href="${esc(it.video)}" download="${esc(it.name)}">Download MP4</a>
+          <button type="button" class="ghost" data-act="delete" ${busy ? "disabled" : ""} style="color:var(--bad);border-color:#5b2a2a">🗑 Delete</button>
           <span class="msg" data-msg></span>
         </div>
       </div>
@@ -1133,6 +1137,25 @@ $("#list").addEventListener("click", async (e) => {
     return;
   }
 
+  if (act === "delete") {
+    if (!confirm(`Delete clip "${it.name}" from disk?`)) return;
+    btn.disabled = true;
+    try {
+      const delUrl = it.source === "job"
+        ? `/api/jobs/${encodeURIComponent(it.job_id)}/clips/${it.index}`
+        : `/api/watcher/clips/${encodeURIComponent(it.name)}`;
+      await api(delUrl, { method: "DELETE" });
+      lastStructSig = "";
+      await refresh();
+    } catch (err) {
+      msgEl.className = "msg err";
+      msgEl.textContent = err.message;
+    } finally {
+      btn.disabled = false;
+    }
+    return;
+  }
+
   if (act === "post-active" || act === "post-selected") {
     const fields = readCardFields(li, it);
     const platforms = act === "post-active" ? [btn.dataset.plat] : fields.target_platforms;
@@ -1174,6 +1197,22 @@ async function refresh(forceStats = false) {
 }
 
 $("#refreshStatsBtn").addEventListener("click", () => { lastStructSig = ""; refresh(true); });
+
+$("#clearLiveClipsBtn").addEventListener("click", async () => {
+  if (!confirm("Delete all unposted live stream clips from disk? (Clips already posted will be kept)")) return;
+  try {
+    const res = await api("/api/watcher/clips/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ keep_posted: true }),
+    });
+    lastStructSig = "";
+    await refresh();
+    alert(`Deleted ${res.deleted} unposted live stream clip(s) (kept ${res.kept} posted clip(s)).`);
+  } catch (e) {
+    alert(e.message);
+  }
+});
 
 $$("[data-filter]").forEach((b) => {
   b.addEventListener("click", () => {

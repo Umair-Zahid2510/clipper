@@ -82,20 +82,61 @@ def resolve_backfill_source(platform: str, channel: str, stream_url: str, join_t
                     info = entries[0]
 
                 fmts = info.get("formats") or []
-                audio_url = next(
-                    (f["url"] for f in fmts if f.get("url") and ("audio" in (f.get("format_id") or "").lower() or f.get("vcodec") == "none")),
-                    None,
-                ) or next(
-                    (f["url"] for f in fmts if f.get("url") and f.get("height") in (160, 240, 360)),
-                    None,
+
+                # Filter out mhtml storyboards (`sb0`, `sb1`, `sb2`) which have vcodec=='none' AND acodec=='none'
+                real_fmts = [
+                    f for f in fmts
+                    if f.get("url") and f.get("protocol") != "mhtml" and f.get("ext") != "mhtml"
+                ]
+
+                # Prefer m3u8_native HLS audio (format 233/234 on YouTube, Audio_Only on Twitch) because it is unthrottled (5x faster than HTTPS DASH)
+                audio_url = (
+                    next(
+                        (
+                            f["url"] for f in real_fmts
+                            if f.get("vcodec") == "none"
+                            and (
+                                f.get("format_id") in ("233", "234")
+                                or "audio" in (f.get("format_id") or "").lower()
+                                or (f.get("acodec") or "none") != "none"
+                            )
+                            and "m3u8" in (f.get("protocol") or "")
+                        ),
+                        None,
+                    )
+                    or next(
+                        (
+                            f["url"] for f in real_fmts
+                            if f.get("vcodec") == "none" and (f.get("acodec") or "none") != "none"
+                        ),
+                        None,
+                    )
+                    or next(
+                        (f["url"] for f in real_fmts if f.get("height") in (144, 160, 240, 360)),
+                        None,
+                    )
                 )
-                video_url = (
-                    next((f["url"] for f in fmts if f.get("url") and f.get("height") == 720), None)
-                    or next((f["url"] for f in fmts if f.get("url") and f.get("height") == 480), None)
-                    or next((f["url"] for f in fmts if f.get("url") and f.get("height") == 1080), None)
-                    or info.get("url")
-                    or info.get("manifest_url")
+
+                # Prefer HTTPS H.264 (`avc1`) 720p/480p video for fast byte-range -c copy slicing (or m3u8 on Twitch)
+                video_fmt = (
+                    next((f for f in real_fmts if f.get("height") == 720 and "avc1" in (f.get("vcodec") or "") and f.get("protocol") == "https"), None)
+                    or next((f for f in real_fmts if f.get("height") == 480 and "avc1" in (f.get("vcodec") or "") and f.get("protocol") == "https"), None)
+                    or next((f for f in real_fmts if f.get("height") == 720 and "avc1" in (f.get("vcodec") or "")), None)
+                    or next((f for f in real_fmts if f.get("height") == 480 and "avc1" in (f.get("vcodec") or "")), None)
+                    or next((f for f in real_fmts if f.get("height") == 720), None)
+                    or next((f for f in real_fmts if f.get("height") == 480), None)
+                    or next((f for f in real_fmts if f.get("height") == 1080), None)
                 )
+                # Also store a direct HTTPS audio URL (`139`/`140`) for fast 30s muxing when video is separate
+                https_audio_url = next(
+                    (
+                        f["url"] for f in real_fmts
+                        if f.get("vcodec") == "none" and (f.get("acodec") or "none") != "none" and f.get("protocol") == "https"
+                    ),
+                    None,
+                ) or audio_url
+                video_url = (video_fmt or {}).get("url") or info.get("url") or info.get("manifest_url")
+                video_has_audio = bool(video_fmt and (video_fmt.get("acodec") or "none") != "none")
                 if not video_url:
                     continue
                 if not audio_url:
@@ -110,10 +151,13 @@ def resolve_backfill_source(platform: str, channel: str, stream_url: str, join_t
                     return {
                         "video_url": str(video_url),
                         "audio_url": str(audio_url),
+                        "mux_audio_url": str(https_audio_url or audio_url),
+                        "video_has_audio": video_has_audio,
                         "webpage_url": str(info.get("webpage_url") or url),
                         "missed_seconds": dur,
                         "started_at": float(start_ts) if start_ts else (join_ts - dur),
                         "title": info.get("title") or f"{channel} stream",
+                        "is_live": bool(info.get("is_live") or info.get("live_status") == "is_live"),
                     }
         except Exception:
             continue
@@ -152,23 +196,40 @@ def scan_window_for_best_30s(
 def download_winning_30s_slice(
     source_info: dict, clip_start_sec: float, out_ts: Path, duration: float = 32.0
 ) -> bool:
-    """Download ONLY the winning 30-second video slice with `-c copy` (~7s, zero CPU re-encode)."""
+    """Download ONLY the winning 30-second video+audio slice with `-c copy` (~7-18s, zero CPU re-encode)."""
     out_ts.parent.mkdir(parents=True, exist_ok=True)
     safe_unlink(out_ts)
     video_url = source_info.get("video_url") or source_info.get("url") or ""
+    audio_url = source_info.get("mux_audio_url") or source_info.get("audio_url") or ""
+    video_has_audio = bool(source_info.get("video_has_audio", True))
 
     if video_url.startswith("http") and not ("youtube.com/" in video_url or "twitch.tv/" in video_url):
-        cmd = [
-            "ffmpeg", "-y", "-loglevel", "error",
-            "-ss", f"{max(0.0, clip_start_sec):.2f}",
-            "-t", f"{duration:.2f}",
-            "-i", video_url,
-            "-c", "copy",
-            str(out_ts),
-        ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
-        if proc.returncode == 0 and out_ts.is_file() and out_ts.stat().st_size > 10_000:
-            return True
+        if not video_has_audio and audio_url and audio_url != video_url:
+            # Separate video & audio streams (e.g. YouTube DASH/HLS): mux both into .mp4 with -c copy
+            out_mp4 = out_ts.with_suffix(".mp4")
+            cmd = [
+                "ffmpeg", "-y", "-loglevel", "error",
+                "-ss", f"{max(0.0, clip_start_sec):.2f}", "-t", f"{duration:.2f}", "-i", video_url,
+                "-ss", f"{max(0.0, clip_start_sec):.2f}", "-t", f"{duration:.2f}", "-i", audio_url,
+                "-c", "copy", "-map", "0:v:0", "-map", "1:a:0",
+                str(out_mp4),
+            ]
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+            if proc.returncode == 0 and out_mp4.is_file() and out_mp4.stat().st_size > 10_000:
+                out_mp4.replace(out_ts)
+                return True
+        else:
+            cmd = [
+                "ffmpeg", "-y", "-loglevel", "error",
+                "-ss", f"{max(0.0, clip_start_sec):.2f}",
+                "-t", f"{duration:.2f}",
+                "-i", video_url,
+                "-c", "copy",
+                str(out_ts),
+            ]
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+            if proc.returncode == 0 and out_ts.is_file() and out_ts.stat().st_size > 10_000:
+                return True
 
     webpage = source_info.get("webpage_url") or video_url
     if webpage:

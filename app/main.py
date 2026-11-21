@@ -706,6 +706,16 @@ def watcher_delete_clip(name: str) -> dict:
     return {"ok": True}
 
 
+class ClearWatcherClipsRequest(BaseModel):
+    keep_posted: bool = True
+    channel: str | None = None
+
+
+@app.post("/api/watcher/clips/clear")
+def watcher_clear_clips(req: ClearWatcherClipsRequest) -> dict:
+    return watcher.controller.clear_clips(keep_posted=req.keep_posted, channel=req.channel)
+
+
 @app.post("/api/watcher/clips/{name}/ai-caption")
 async def watcher_ai_caption(name: str) -> dict:
     try:
@@ -1128,6 +1138,7 @@ def list_posts_and_stats(refresh_stats: bool = False) -> dict:
         if isinstance(yt_info, dict) and yt_info.get("video_id"):
             video_ids.append(yt_info["video_id"])
         chan = wc.get("channel")
+        c_name = wc.get("campaign_name")
         is_camp = watcher.controller.campaign_mode
         t_url = None if is_camp else (f"https://www.twitch.tv/{chan}" if chan else None)
         add_link = False if is_camp else wc.get("add_source_link", True)
@@ -1137,10 +1148,11 @@ def list_posts_and_stats(refresh_stats: bool = False) -> dict:
         tags = wc.get("hashtags") or list(watcher.cw_config.CAMPAIGN_HASHTAGS)
         app_st = wc.get("approval_status") or ("approved" if auto_approve else "pending")
         t_plats = _normalize_target_platforms(wc.get("target_platforms"))
+        src_lbl = f"Live (#{chan})" if chan else (c_name or "Live Stream")
         item_dict = {
             "key": f"watcher:{wc['name']}",
             "source": "watcher",
-            "source_label": f"KreekCraft Live (#{chan})" if chan else "Live Stream",
+            "source_label": src_lbl,
             "source_url": t_url,
             "name": wc["name"],
             "video": wc["video"],

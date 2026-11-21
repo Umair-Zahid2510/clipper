@@ -97,6 +97,13 @@ def _read_store() -> dict:
             if isinstance(data, dict) and isinstance(data.get("campaigns"), dict):
                 data["campaigns"].setdefault("general", dict(GENERAL_PROFILE))
                 data["campaigns"].setdefault("kreekcraft-gta6", dict(DEFAULT_KREEKCRAFT_CAMPAIGN))
+                # Repair any campaign profile where streamer was parsed as the verb "Put"
+                for cid, c in data["campaigns"].items():
+                    if c.get("streamer") == "Put" and "clipup" in cid.lower():
+                        c["name"] = "ClipUp GTA 6 Campaign"
+                        c["streamer"] = "GTA6"
+                        c["required_cta"] = ""
+                        c["cpm_usd"] = 0.30
                 if data.get("active_id") not in data["campaigns"]:
                     data["active_id"] = "kreekcraft-gta6"
                 return data
@@ -300,14 +307,20 @@ def parse_rules_brief(text: str) -> dict:
             urls.append(u)
 
     no_links = bool(re.search(r"do not include links|no links or urls", raw, re.I))
-    req_ov = bool(re.search(r"logo overlay|overlay must", raw, re.I))
+    req_ov = bool(re.search(r"logo overlay|overlay must|put the .* logo", raw, re.I))
 
-    streamer = name.split()[0] if name else "Streamer"
+    first_word = name.split()[0] if name else "Streamer"
+    if first_word.lower() in ("put", "add", "use", "clip", "turn", "make", "post", "join", "the"):
+        streamer = next((t for t in tags if t.lower() not in ("shorts", "clips", "viral")), "GTA6")
+        req_cta = cta
+    else:
+        streamer = first_word
+        req_cta = cta or f"Watch {streamer} on YouTube and Twitch! 🔴"
     return {
-        "name": name,
+        "name": name[:60],
         "streamer": streamer,
         "stream_urls": urls,
-        "required_cta": cta or f"Watch {streamer} on YouTube and Twitch! 🔴",
+        "required_cta": req_cta,
         "required_hashtags": tags or ["shorts", "gaming"],
         "no_links": no_links,
         "require_overlay": req_ov,

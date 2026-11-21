@@ -75,7 +75,8 @@ def parse_stream_info(raw: str) -> dict:
 
             if vid and _YT_ID_RE.fullmatch(vid):
                 is_kreek = vid == "dy-oCN2NxfA" or "kreek" in low
-                chan = "kreekcraft" if is_kreek else f"yt_{vid[:10].lower()}"
+                is_speed = vid == "qSyo5d-dVzA" or "speed" in low
+                chan = "kreekcraft" if is_kreek else ("ishowspeed" if is_speed else f"yt_{vid[:10].lower()}")
                 return {
                     "platform": "youtube",
                     "channel": chan,
@@ -742,67 +743,89 @@ class WatcherController:
 
             n_chunks = len(windows)
             made = 0
-            for idx, (start_s, win_len) in enumerate(windows, start=1):
-                # Skip chunks already exported in output_clips/ so resuming picks up where it left off
+            sem = asyncio.Semaphore(3)  # 3x concurrent catch-up workers
+
+            async def _process_one_window(idx: int, start_s: float, win_len: float) -> bool:
+                nonlocal made
                 if list(cw_config.OUTPUT_DIR.glob(f"{chan}_catchup{idx:02d}_*.mp4")):
                     made += 1
                     self.backfill_clips_count = max(self.backfill_clips_count, made)
-                    continue
-
-                t_range = f"{backfill.fmt_clock(start_s)}–{backfill.fmt_clock(start_s + win_len)}"
-                self.backfill_status = (
-                    f"Missed {missed_str} · Scanning audio {idx}/{n_chunks} ({t_range})..."
-                )
-                scan_wav = backfill.BACKFILL_TEMP_DIR / f"_bf_scan_{chan}_{idx:02d}_{int(time.time())}.wav"
-                slice_ts = backfill.BACKFILL_TEMP_DIR / f"_bf_slice_{chan}_{idx:02d}_{int(time.time())}.ts"
-                try:
-                    best_rel, peak_score = await asyncio.to_thread(
-                        backfill.scan_window_for_best_30s, src_info, start_s, win_len, scan_wav, 30.0
-                    )
-                    if peak_score < 0.002:
-                        continue
-                    clip_abs_start = start_s + best_rel
-                    clip_clock = backfill.fmt_clock(clip_abs_start)
+                    return True
+                async with sem:
+                    # Refresh signed stream URLs if running for > 45 minutes
+                    t_range = f"{backfill.fmt_clock(start_s)}–{backfill.fmt_clock(start_s + win_len)}"
                     self.backfill_status = (
-                        f"Missed {missed_str} · Chunk {idx}/{n_chunks}: clipping 30s peak at {clip_clock}..."
+                        f"Missed {missed_str} · Scanning 3x parallel [{idx}/{n_chunks}] ({t_range}) · {made} clips exported..."
                     )
-                    ok = await asyncio.to_thread(
-                        backfill.download_winning_30s_slice, src_info, clip_abs_start, slice_ts, 31.0
+                    # For fast audio scanning, probe the central 4 minutes (240s) of a 10m window (~5s on HLS)
+                    scan_len = min(win_len, 240.0)
+                    scan_start = start_s + max(0.0, (win_len - scan_len) / 2.0)
+                    uid = f"{chan}_{idx:02d}_{int(time.time() * 1000) % 100000}"
+                    scan_wav = backfill.BACKFILL_TEMP_DIR / f"_bf_scan_{uid}.wav"
+                    slice_ts = backfill.BACKFILL_TEMP_DIR / f"_bf_slice_{uid}.ts"
+                    try:
+                        best_rel, peak_score = await asyncio.to_thread(
+                            backfill.scan_window_for_best_30s, src_info, scan_start, scan_len, scan_wav, 30.0
+                        )
+                        if peak_score < 0.002:
+                            return False
+                        clip_abs_start = scan_start + best_rel
+                        clip_clock = backfill.fmt_clock(clip_abs_start)
+                        self.backfill_status = (
+                            f"Missed {missed_str} · Chunk {idx}/{n_chunks}: clipping 30s peak at {clip_clock} ({made} ready)..."
+                        )
+                        ok = await asyncio.to_thread(
+                            backfill.download_winning_30s_slice, src_info, clip_abs_start, slice_ts, 31.0
+                        )
+                        if not ok or not slice_ts.is_file():
+                            return False
+                        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        tag = f"{chan}_catchup{idx:02d}_{stamp}"
+                        camp = self.active_campaign()
+                        is_camp = camp.get("id") != "general" and self.campaign_mode
+                        ov_path = campaigns.get_overlay_path_for_campaign(camp.get("id")) if is_camp else None
+                        out_clip = await asyncio.to_thread(
+                            backfill.process_chunk_to_clip,
+                            slice_ts,
+                            tag,
+                            self.vertical_mode,
+                            self.vertical_layout,
+                            is_camp,
+                            0.0,
+                            ov_path,
+                            is_camp,
+                            camp,
+                        )
+                        made += 1
+                        self.backfill_clips_count = max(self.backfill_clips_count, made)
+                        self.backfill_status = (
+                            f"Missed {missed_str} · Exported {out_clip.name} ({made}/{n_chunks} chunks done)"
+                        )
+                        if self.auto_post and self.on_clip_exported:
+                            try:
+                                self.on_clip_exported(out_clip.name)
+                            except Exception:
+                                pass
+                        return True
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as chunk_exc:
+                        self.backfill_status = f"Chunk {idx}/{n_chunks} skipped ({chunk_exc})"
+                        return False
+                    finally:
+                        backfill.safe_unlink(scan_wav)
+                        backfill.safe_unlink(slice_ts)
+
+            # Process in batches of 3 concurrent windows so the most recent gameplay finishes first and 3x faster
+            batch_size = 3
+            for b_start in range(0, len(windows), batch_size):
+                batch = windows[b_start : b_start + batch_size]
+                await asyncio.gather(
+                    *(
+                        _process_one_window(b_start + offset + 1, w_s, w_l)
+                        for offset, (w_s, w_l) in enumerate(batch)
                     )
-                    if not ok or not slice_ts.is_file():
-                        continue
-                    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    tag = f"{chan}_catchup{idx:02d}_{stamp}"
-                    camp = self.active_campaign()
-                    is_camp = camp.get("id") != "general" and self.campaign_mode
-                    ov_path = campaigns.get_overlay_path_for_campaign(camp.get("id")) if is_camp else None
-                    out_clip = await asyncio.to_thread(
-                        backfill.process_chunk_to_clip,
-                        slice_ts,
-                        tag,
-                        self.vertical_mode,
-                        self.vertical_layout,
-                        is_camp,
-                        0.0,
-                        ov_path,
-                        is_camp,
-                        camp,
-                    )
-                    made += 1
-                    self.backfill_clips_count = max(self.backfill_clips_count, made)
-                    if self.auto_post and self.on_clip_exported:
-                        try:
-                            self.on_clip_exported(out_clip.name)
-                        except Exception:
-                            pass
-                except asyncio.CancelledError:
-                    raise
-                except Exception as chunk_exc:
-                    self.backfill_status = f"Chunk {idx}/{n_chunks} skipped ({chunk_exc})"
-                    continue
-                finally:
-                    backfill.safe_unlink(scan_wav)
-                    backfill.safe_unlink(slice_ts)
+                )
 
             self.backfill_status = (
                 f"Catch-up finished ({made} clip{'s' if made != 1 else ''} from {missed_str} missed stream time)"
@@ -869,11 +892,37 @@ class WatcherController:
     def delete_clip(self, name: str) -> None:
         target = self.resolve_clip_path(name)
         meta = self.read_meta(target)
-        if (meta.get("youtube") or {}).get("status") in ("queued", "uploading"):
-            raise RuntimeError("This clip is being posted to YouTube. Wait for it to finish.")
+        for p in ("youtube", "tiktok", "instagram"):
+            if (meta.get(p) or {}).get("status") in ("queued", "uploading"):
+                raise RuntimeError(f"This clip is being posted to {p}. Wait for it to finish.")
         target.unlink()
         target.with_suffix(".srt").unlink(missing_ok=True)
         target.with_suffix(".json").unlink(missing_ok=True)
+
+    def clear_clips(self, keep_posted: bool = True, channel: str | None = None) -> dict:
+        """Bulk delete live stream clips (optionally keeping clips that have already been posted)."""
+        deleted = 0
+        kept = 0
+        files = [p for p in cw_config.OUTPUT_DIR.glob("*.mp4") if not p.name.startswith(".tmp_")]
+        for p in files:
+            meta = self.read_meta(p)
+            if channel and (meta.get("channel") or "").lower() != channel.lower():
+                kept += 1
+                continue
+            busy = any((meta.get(plat) or {}).get("status") in ("queued", "uploading") for plat in ("youtube", "tiktok", "instagram"))
+            if busy:
+                kept += 1
+                continue
+            posted = any((meta.get(plat) or {}).get("status") == "done" for plat in ("youtube", "tiktok", "instagram"))
+            if keep_posted and posted:
+                kept += 1
+                continue
+            p.unlink(missing_ok=True)
+            p.with_suffix(".srt").unlink(missing_ok=True)
+            p.with_suffix(".json").unlink(missing_ok=True)
+            deleted += 1
+        self.backfill_clips_count = len(list(cw_config.OUTPUT_DIR.glob("*_catchup*.mp4")))
+        return {"ok": True, "deleted": deleted, "kept": kept}
 
     def status(self) -> dict:
         rec = self.recorder
