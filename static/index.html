@@ -30,10 +30,17 @@
   a { color: #8cc8ff; }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
   .wrap { max-width: 1180px; margin: 0 auto; padding: 0 20px 80px; }
-  header { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 22px 0; }
   .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 19px; letter-spacing: -.01em; }
   .brand i { width: 26px; height: 26px; border-radius: 7px; background: var(--accent); display: grid; place-items: center; }
   .brand i::after { content: ""; border-left: 9px solid var(--accent-ink); border-top: 6px solid transparent; border-bottom: 6px solid transparent; margin-left: 2px; }
+  @view-transition { navigation: auto; }
+  .nav { display: inline-flex; gap: 4px; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; }
+  .nav a { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; padding: 0 14px; border-radius: 999px;
+    font-size: 13.5px; font-weight: 600; color: var(--muted); text-decoration: none; transition: background .15s, color .15s; }
+  .nav a:hover { color: var(--text); }
+  .nav a[aria-current="page"] { background: var(--accent); color: var(--accent-ink); }
+  .nav .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); }
   .mode { font-size: 12.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; }
   .mode b { color: var(--text); font-weight: 600; }
   .mode .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; background: var(--low); }
@@ -408,6 +415,11 @@
 <div class="wrap">
   <header>
     <div class="brand"><i aria-hidden="true"></i>Clipsmith</div>
+    <nav class="nav" aria-label="Mode">
+      <a href="/" aria-current="page">Video to Shorts</a>
+      <a href="/watcher"><span class="dot" id="watchDot" hidden aria-hidden="true"></span>Live Stream</a>
+      <a href="/posts">Posts &amp; Stats</a>
+    </nav>
     <div class="hdr-right">
       <span id="yt" class="hdr-right"></span>
       <div class="mode" id="mode" role="status"><span class="dot" aria-hidden="true"></span>Checking…</div>
@@ -480,6 +492,7 @@
     <div class="switches">
       <label class="switch"><span><b>Hook text at the start</b><small>A short line on screen in the first seconds</small></span><input type="checkbox" role="switch" id="hook" checked></label>
       <label class="switch"><span><b>Remove pauses and "uh"/"um"</b><small>Tighter pacing, same words</small></span><input type="checkbox" role="switch" id="trim" checked></label>
+      <label class="switch"><span><b>Auto-post clips to YouTube when ready</b><small>Automatically uploads every generated clip to your active YouTube channel</small></span><input type="checkbox" role="switch" id="autopost"></label>
     </div>
     </div>
 
@@ -516,6 +529,8 @@
 <dialog id="ytdlg" aria-labelledby="ytdlgTitle">
   <form class="dlg" id="ytform" method="dialog">
     <h2 id="ytdlgTitle">Post to YouTube <span class="sub" id="ytchan"></span></h2>
+    <div id="ytAccountRow" hidden><label class="lbl" for="ytAccount">YouTube channel</label>
+      <select id="ytAccount"></select></div>
     <div><label class="lbl" for="ytTitle">Title <span class="count" id="ytCount">0/100</span></label>
       <input type="text" id="ytTitle" maxlength="100" required></div>
     <div><label class="lbl" for="ytDesc">Description</label><textarea id="ytDesc" maxlength="4500"></textarea></div>
@@ -568,28 +583,52 @@ async function init() {
     $("#style").innerHTML = Object.entries(st.styles).map(([k, v]) => `<option value="${esc(k)}">${esc(v)}</option>`).join("");
   } catch (e) { $("#mode").textContent = "Server not reachable"; }
   showConnectResult();
+  loadWatcherBadge();
   await loadYouTube();
   await refresh();
 }
 
+async function loadWatcherBadge() {
+  try {
+    const w = await api("/api/watcher/status");
+    $("#watchDot").hidden = !w.running;
+  } catch {}
+}
+
 // ---------- YouTube ----------
-let yt = { configured: false, connected: false, channel: null };
+let yt = { configured: false, connected: false, channel: null, accounts: [], active_id: null };
 const SETUP_DOC = "https://github.com/AbdulSamad94/clipsmith/blob/main/docs/youtube-setup.md";
 
 async function loadYouTube() {
-  try { yt = await api("/api/youtube"); } catch { return; }
+  try {
+    const [st, acc] = await Promise.all([api("/api/youtube"), api("/api/youtube/accounts").catch(() => ({ accounts: [], active_id: null }))]);
+    yt = { ...st, accounts: acc.accounts || [], active_id: acc.active_id || null };
+  } catch { return; }
   const el = $("#yt");
   if (!yt.configured) {
     el.innerHTML = `<a class="ytbadge" href="${SETUP_DOC}" target="_blank" rel="noopener"><span class="ytdot"></span>Set up YouTube posting</a>`;
   } else if (!yt.connected) {
     el.innerHTML = `<a class="ytbadge" href="/api/youtube/connect"><span class="ytdot"></span>Connect YouTube</a>`;
   } else {
-    const name = yt.channel ? yt.channel.title : "connected";
-    el.innerHTML = `<span class="ytbadge on"><span class="ytdot"></span>YouTube: <b>${esc(name)}</b></span>
+    const accs = yt.accounts.length ? yt.accounts : [{ id: (yt.channel && yt.channel.id) || "default", title: (yt.channel && yt.channel.title) || "connected", active: true }];
+    const switcher = accs.length > 1
+      ? `<select class="ytbadge on" id="ytSelect" aria-label="Active YouTube channel" style="padding-right:28px;min-height:36px">${accs.map((a) => `<option value="${esc(a.id)}" ${a.active ? "selected" : ""}>YouTube: ${esc(a.title)}</option>`).join("")}</select>`
+      : `<span class="ytbadge on"><span class="ytdot"></span>YouTube: <b>${esc(accs[0].title)}</b></span>`;
+    el.innerHTML = `${switcher}
+      <a class="ytbadge" href="/api/youtube/connect" title="Link another YouTube channel">+ Add channel</a>
       <button class="ytbadge" id="ytOff" type="button">Disconnect</button>`;
+    const sel = $("#ytSelect");
+    if (sel) {
+      sel.onchange = async () => {
+        await api("/api/youtube/select", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account_id: sel.value }) }).catch((e) => alert(e.message));
+        await loadYouTube();
+      };
+    }
     $("#ytOff").onclick = async () => {
-      if (!confirm("Disconnect YouTube? Clipsmith will no longer be able to post to your channel.")) return;
-      await api("/api/youtube/disconnect", { method: "POST" }).catch((e) => alert(e.message));
+      const cur = accs.find((a) => a.active) || accs[0];
+      if (!confirm(`Disconnect YouTube channel "${cur.title}"?`)) return;
+      const q = cur && cur.id ? `?account_id=${encodeURIComponent(cur.id)}` : "";
+      await api(`/api/youtube/disconnect${q}`, { method: "POST" }).catch((e) => alert(e.message));
       await loadYouTube();
     };
   }
@@ -800,6 +839,9 @@ function openPost(jobId, index) {
   }
   posting = { job: jobId, index, video: c.video };
   returnFocus = document.activeElement;
+  const accs = (yt.accounts && yt.accounts.length) ? yt.accounts : (yt.channel ? [{ id: yt.channel.id || "default", title: yt.channel.title, active: true }] : []);
+  $("#ytAccountRow").hidden = accs.length <= 1;
+  $("#ytAccount").innerHTML = accs.map((a) => `<option value="${esc(a.id)}" ${a.active ? "selected" : ""}>${esc(a.title)}</option>`).join("");
   $("#ytchan").textContent = yt.channel ? `· ${yt.channel.title}` : "";
   $("#ytTitle").value = (c.title || "").replace(/[<>]/g, "").slice(0, 100);
   $("#ytDesc").value = c.description || "";
@@ -855,6 +897,7 @@ $("#ytform").addEventListener("submit", async (e) => {
     notify_subscribers: $("#ytNotify").checked,
     add_source_link: !$("#ytLinkRow").hidden && $("#ytLink").checked,
     clip_video: posting.video, // lets the server refuse if this position now holds another clip
+    account_id: (!$("#ytAccountRow").hidden && $("#ytAccount").value) ? $("#ytAccount").value : undefined,
   };
   $("#ytSubmit").disabled = true;
   try {
@@ -1136,6 +1179,7 @@ $("#form").addEventListener("submit", async (e) => {
       for (const [k, v] of Object.entries({
         clip_count: radio("count"), min_len, max_len,
         style: $("#style").value, layout: $("#layout").value, aspect: radio("aspect"), hook: $("#hook").checked, trim_pauses: $("#trim").checked,
+        auto_post: $("#autopost").checked, auto_privacy: "public", auto_account_id: yt.active_id || undefined,
         prompt: $("#prompt").value.trim(), start_time, end_time,
       })) if (v !== null && v !== undefined) fd.append(k, v);
       $("#go").disabled = true;
@@ -1163,6 +1207,7 @@ $("#form").addEventListener("submit", async (e) => {
       body: JSON.stringify({
         url: $("#url").value.trim(), clip_count: +radio("count"), min_len, max_len,
         style: $("#style").value, layout: $("#layout").value, aspect: radio("aspect"), hook: $("#hook").checked, trim_pauses: $("#trim").checked,
+        auto_post: $("#autopost").checked, auto_privacy: "public", auto_account_id: yt.active_id || undefined,
         prompt: $("#prompt").value.trim(), start_time, end_time,
       }),
     });

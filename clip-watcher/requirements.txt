@@ -1,0 +1,6 @@
+streamlink
+faster-whisper
+rich
+python-dotenv
+numpy
+

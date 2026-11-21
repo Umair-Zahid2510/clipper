@@ -1,4 +1,4 @@
-"""Post clips to the user's own YouTube channel.
+"""Post clips to the user's own YouTube channel (supports single and multiple channels).
 
 Uses the YouTube Data API v3 with the user's own Google "Desktop app" OAuth
 client (see docs/youtube-setup.md). Limits and rules below come from Google's
@@ -20,6 +20,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
+from urllib.parse import parse_qs, urlparse
 
 from . import config
 
@@ -34,7 +35,7 @@ PRIVACY = ("public", "unlisted", "private")
 # ones added; without this oauthlib treats that as an error.
 os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 
-_pending: dict[str, dict] = {}  # OAuth state -> {"flow", "created"}; sign-ins in progress
+_pending: dict[str, dict] = {}  # OAuth state -> {"flow", "created", "return_to"}; sign-ins in progress
 _PENDING_TTL = 15 * 60
 
 
@@ -130,7 +131,11 @@ def build_metadata(
     return {"snippet": snippet, "status": status}
 
 
-# ---------- sign-in ----------
+# ---------- sign-in & multi-account storage ----------
+
+def _accounts_path() -> Path:
+    return TOKEN_PATH.parent / "youtube_accounts.json"
+
 
 def _client_config() -> dict | None:
     cid, secret = os.environ.get("YOUTUBE_CLIENT_ID", "").strip(), os.environ.get("YOUTUBE_CLIENT_SECRET", "").strip()
@@ -152,6 +157,38 @@ def _read_token() -> dict | None:
         return None
 
 
+def _read_accounts_store() -> dict:
+    path = _accounts_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and isinstance(data.get("accounts"), dict):
+            return data
+    except (OSError, ValueError):
+        pass
+    # Migrate single-account token if present
+    tok = _read_token()
+    if tok and tok.get("refresh_token"):
+        ch = tok.get("channel") or {}
+        aid = ch.get("id") or "default"
+        return {"active_id": aid, "accounts": {aid: tok}}
+    return {"active_id": None, "accounts": {}}
+
+
+def _write_accounts_store(store: dict) -> None:
+    path = _accounts_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(store), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _write_active_token(data: dict) -> None:
+    TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = TOKEN_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data), encoding="utf-8")
+    tmp.replace(TOKEN_PATH)
+
+
 def status() -> dict:
     token = _read_token()
     return {
@@ -159,6 +196,38 @@ def status() -> dict:
         "connected": bool(token and token.get("refresh_token")),
         "channel": (token or {}).get("channel"),
     }
+
+
+def list_accounts() -> dict:
+    """Return all linked YouTube channels and which one is currently active."""
+    store = _read_accounts_store()
+    accounts = []
+    for aid, tok in store["accounts"].items():
+        if not (tok and tok.get("refresh_token")):
+            continue
+        ch = tok.get("channel") or {}
+        accounts.append({
+            "id": aid,
+            "title": ch.get("title") or aid,
+            "active": aid == store.get("active_id"),
+        })
+    return {
+        "configured": _client_config() is not None,
+        "active_id": store.get("active_id"),
+        "accounts": accounts,
+    }
+
+
+def select_account(account_id: str) -> dict:
+    """Switch the active YouTube channel by account/channel ID."""
+    store = _read_accounts_store()
+    tok = store["accounts"].get(account_id)
+    if not tok or not tok.get("refresh_token"):
+        raise ValueError("YouTube account not found.")
+    store["active_id"] = account_id
+    _write_accounts_store(store)
+    _write_active_token(tok)
+    return list_accounts()
 
 
 def start_auth(redirect_uri: str) -> str:
@@ -177,8 +246,27 @@ def start_auth(redirect_uri: str) -> str:
     flow = Flow.from_client_config(cfg, scopes=SCOPES, redirect_uri=redirect_uri)  # PKCE S256 by default
     state = secrets.token_urlsafe(24)
     url, _ = flow.authorization_url(access_type="offline", prompt="consent", state=state)
-    _pending[state] = {"flow": flow, "created": time.time()}
+    _pending[state] = {"flow": flow, "created": time.time(), "return_to": "/"}
     return url
+
+
+def set_return_to(auth_url: str, return_to: str) -> None:
+    """Record which page (/ or /watcher) initiated the OAuth flow."""
+    if return_to not in ("/", "/watcher"):
+        return
+    q = parse_qs(urlparse(auth_url).query)
+    state = (q.get("state") or [None])[0]
+    if state and state in _pending:
+        _pending[state]["return_to"] = return_to
+
+
+def get_return_to(state: str | None) -> str:
+    """Return the dashboard path associated with an in-flight OAuth state."""
+    if state and state in _pending:
+        dest = _pending[state].get("return_to")
+        if dest in ("/", "/watcher"):
+            return dest
+    return "/"
 
 
 def _fetch_channel(creds) -> dict | None:
@@ -210,13 +298,16 @@ def finish_auth(state: str, code: str) -> dict | None:
     return channel
 
 
-def _save_token(data: dict, channel: dict | None) -> None:
-    """Write the login atomically, so a crash mid-write can't corrupt it."""
-    data = dict(data, channel=channel)
-    TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = TOKEN_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data), encoding="utf-8")
-    tmp.replace(TOKEN_PATH)
+def _save_token(data: dict, channel: dict | None, account_id: str | None = None) -> None:
+    """Write the login atomically, and upsert it in the multi-account store."""
+    entry = dict(data, channel=channel)
+    aid = account_id or (channel or {}).get("id") or "default"
+    store = _read_accounts_store()
+    store["accounts"][aid] = entry
+    if store.get("active_id") is None or account_id is None or store.get("active_id") == aid:
+        store["active_id"] = aid
+        _write_active_token(entry)
+    _write_accounts_store(store)
 
 
 def _revoke(token: str) -> None:
@@ -225,22 +316,55 @@ def _revoke(token: str) -> None:
     requests.post("https://oauth2.googleapis.com/revoke", params={"token": token}, timeout=10)
 
 
-def disconnect() -> None:
-    token = _read_token()
+def disconnect(account_id: str | None = None) -> None:
+    store = _read_accounts_store()
+    if account_id is None:
+        target_id = store.get("active_id")
+        token = _read_token() or (store["accounts"].get(target_id) if target_id else None)
+    else:
+        target_id = account_id
+        token = store["accounts"].get(target_id)
+
     if token:
         try:
             _revoke(token.get("refresh_token") or token.get("token") or "")
         except Exception:
             pass  # forget it locally even if Google can't be reached
-    TOKEN_PATH.unlink(missing_ok=True)
+
+    if target_id and target_id in store["accounts"]:
+        del store["accounts"][target_id]
+
+    remaining_ids = [k for k, v in store["accounts"].items() if v and v.get("refresh_token")]
+    if not remaining_ids:
+        TOKEN_PATH.unlink(missing_ok=True)
+        _accounts_path().unlink(missing_ok=True)
+    else:
+        if store.get("active_id") not in remaining_ids:
+            store["active_id"] = remaining_ids[0]
+        _write_active_token(store["accounts"][store["active_id"]])
+        _write_accounts_store(store)
 
 
-def _service():
+def _get_account_token(account_id: str | None = None) -> tuple[str | None, dict | None]:
+    if account_id:
+        store = _read_accounts_store()
+        tok = store["accounts"].get(account_id)
+        return account_id, tok
+    tok = _read_token()
+    if tok and tok.get("refresh_token"):
+        aid = (tok.get("channel") or {}).get("id") or "default"
+        return aid, tok
+    store = _read_accounts_store()
+    aid = store.get("active_id")
+    return aid, (store["accounts"].get(aid) if aid else None)
+
+
+def _service(account_id: str | None = None):
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
     from googleapiclient.discovery import build
 
-    token = _read_token()
+    aid, token = _get_account_token(account_id)
     if not token or not token.get("refresh_token"):
         raise UploadError("YouTube isn't connected. Click Connect YouTube first.")
     creds = Credentials.from_authorized_user_info(token, SCOPES)
@@ -252,7 +376,7 @@ def _service():
                 "YouTube sign-in has expired or was revoked. Reconnect YouTube (click Connect YouTube at the top). "
                 "Google signs Testing-mode apps out every 7 days; see docs/youtube-setup.md."
             ) from exc
-        _save_token(json.loads(creds.to_json()), token.get("channel"))
+        _save_token(json.loads(creds.to_json()), token.get("channel"), account_id=aid)
     return build("youtube", "v3", credentials=creds, cache_discovery=False)
 
 
@@ -295,6 +419,7 @@ def upload(
     progress: Callable[[int], None] | None = None,
     service=None,
     sleep: Callable[[float], None] = time.sleep,
+    account_id: str | None = None,
 ) -> str:
     """Resumable upload with exponential backoff, following Google's sample:
     retry 500/502/503/504 and network errors, fail fast on anything else."""
@@ -304,7 +429,7 @@ def upload(
     from googleapiclient.errors import HttpError
     from googleapiclient.http import MediaFileUpload
 
-    service = service or _service()
+    service = service or _service(account_id=account_id)
     media = MediaFileUpload(str(path), mimetype="video/mp4", chunksize=_CHUNK, resumable=True)
     request = service.videos().insert(
         part="snippet,status", body=metadata, media_body=media, notifySubscribers=notify_subscribers
@@ -333,3 +458,56 @@ def upload(
     if progress:
         progress(100)
     return response["id"]
+
+
+# ---------- live statistics ----------
+
+_stats_cache: dict[str, tuple[float, dict]] = {}
+_STATS_TTL = 25.0
+
+
+def fetch_video_stats(
+    video_ids: list[str], account_id: str | None = None, force: bool = False
+) -> dict[str, dict]:
+    """Fetch view, like, and comment counts for uploaded YouTube video IDs.
+    Uses a short TTL cache so dashboard polling doesn't exhaust API quota."""
+    clean_ids = list(dict.fromkeys(v.strip() for v in video_ids if v and v.strip()))
+    if not clean_ids or not status()["connected"]:
+        return {}
+
+    now = time.time()
+    out: dict[str, dict] = {}
+    missing: list[str] = []
+    for vid in clean_ids:
+        cached = _stats_cache.get(vid)
+        if not force and cached and (now - cached[0]) < _STATS_TTL:
+            out[vid] = cached[1]
+        else:
+            missing.append(vid)
+
+    if not missing:
+        return out
+
+    try:
+        svc = _service(account_id=account_id)
+        for i in range(0, len(missing), 50):
+            chunk = missing[i : i + 50]
+            resp = svc.videos().list(part="statistics", id=",".join(chunk)).execute()
+            for item in resp.get("items") or []:
+                vid = item.get("id")
+                st = item.get("statistics") or {}
+                entry = {
+                    "views": int(st.get("viewCount", 0) or 0),
+                    "likes": int(st.get("likeCount", 0) or 0),
+                    "comments": int(st.get("commentCount", 0) or 0),
+                    "updated_at": now,
+                }
+                if vid:
+                    _stats_cache[vid] = (now, entry)
+                    out[vid] = entry
+    except Exception:
+        for vid in missing:
+            if vid in _stats_cache:
+                out[vid] = _stats_cache[vid][1]
+    return out
+

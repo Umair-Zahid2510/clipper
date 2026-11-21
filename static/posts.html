@@ -1,0 +1,1114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clipsmith — Multi-Social Publisher, Approval Loop &amp; Live Stats</title>
+<style>
+  :root {
+    --bg: #0d0e12; --panel: #16181f; --panel-2: #1d2029; --line: #2a2e3a;
+    --text: #eef0f5; --muted: #a9b0c0; --accent: #ffd60a; --accent-ink: #1a1500;
+    --good: #4ade80; --mid: #fbbf24; --bad: #ff8a8a; --ring: #7cc4ff;
+    --yt: #ff3b30; --tt: #00f2fe; --ig: #e1306c;
+    --f-body: "Segoe UI", system-ui, -apple-system, sans-serif;
+    --f-mono: ui-monospace, Consolas, monospace;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  @view-transition { navigation: auto; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15.5px/1.55 var(--f-body); }
+  :focus-visible { outline: 3px solid var(--ring); outline-offset: 2px; }
+  a { color: #8cc8ff; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 20px 80px; animation: fadeIn .18s ease-out; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } }
+
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 20px 0; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 19px; letter-spacing: -.01em; }
+  .brand i { width: 26px; height: 26px; border-radius: 7px; background: var(--accent); display: grid; place-items: center; }
+  .brand i::after { content: ""; border-left: 9px solid var(--accent-ink); border-top: 6px solid transparent; border-bottom: 6px solid transparent; margin-left: 2px; }
+  .nav { display: inline-flex; gap: 4px; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; }
+  .nav a { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; padding: 0 14px; border-radius: 999px;
+    font-size: 13.5px; font-weight: 600; color: var(--muted); text-decoration: none; transition: background .15s, color .15s; }
+  .nav a:hover { color: var(--text); }
+  .nav a[aria-current="page"] { background: var(--accent); color: var(--accent-ink); }
+  .nav .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); }
+  .hdr-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .sbadge { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); border: 1px solid var(--line);
+    border-radius: 999px; padding: 5px 12px; min-height: 36px; text-decoration: none; background: var(--panel); cursor: pointer; }
+  .sbadge b { color: var(--text); font-weight: 600; }
+  .sbadge.on { border-color: rgba(74,222,128,.45); color: var(--text); }
+  .sdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #666; }
+  .sdot.on { background: var(--good); }
+
+  .hero { text-align: center; padding: 14px 0 10px; }
+  h1 { font-size: clamp(25px, 4vw, 36px); line-height: 1.12; margin: 0 0 8px; letter-spacing: -.03em; }
+  h1 em { font-style: normal; color: var(--accent); }
+  .hero p { color: var(--muted); margin: 0 auto; max-width: 720px; font-size: 14.5px; }
+
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; border: 0; border-radius: 10px; font-weight: 600; }
+  input[type=text], input[type=password], input[type=number], select, textarea {
+    width: 100%; min-height: 40px; background: var(--bg); color: var(--text);
+    border: 1px solid #3a3f4d; border-radius: 10px; padding: 7px 11px; font-size: 14px;
+  }
+  input:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; border-color: var(--ring); box-shadow: 0 0 0 3px rgba(124,196,255,.35); }
+  .go { background: var(--accent); color: var(--accent-ink); padding: 0 16px; min-height: 40px; font-weight: 700; white-space: nowrap; }
+  .go:hover:not(:disabled) { filter: brightness(1.07); }
+  .go:disabled { opacity: .45; cursor: not-allowed; }
+  .go.stop { background: #ff5b5b; color: #190000; }
+  .ghost { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 38px; padding: 0 13px;
+    background: transparent; color: var(--text); border: 1px solid #3a3f4d; text-decoration: none; font-size: 13px; border-radius: 10px; }
+  .ghost:hover:not(:disabled) { background: var(--panel-2); border-color: #5a6072; }
+  .ghost:disabled { opacity: .45; cursor: not-allowed; }
+
+  /* ---------- Guided Social Accounts & Tokens Setup Wizard ---------- */
+  .wizard { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; margin-top: 14px; }
+  .wiz-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .wiz-head h2 { margin: 0; font-size: 15.5px; display: flex; align-items: center; gap: 8px; }
+  .wiz-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0 12px; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+  .wtab { min-height: 36px; padding: 0 14px; border-radius: 10px; background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; }
+  .wtab.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
+  .wiz-grid { display: grid; grid-template-columns: 1.05fr 1.25fr; gap: 16px; align-items: start; }
+  .guide-box { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 13px 15px; font-size: 13.5px; }
+  .guide-box h3 { margin: 0 0 8px; font-size: 14px; color: var(--accent); }
+  .guide-box ol { margin: 0; padding-left: 18px; color: var(--muted); }
+  .guide-box li { margin-bottom: 5px; }
+  .guide-box code { font-family: var(--f-mono); font-size: 12px; color: var(--text); background: var(--panel-2); padding: 2px 5px; border-radius: 5px; }
+  .form-box { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 13px 15px; display: grid; gap: 10px; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .acc-list { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+  .acc-chip { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; padding: 4px 10px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); }
+  .acc-chip.active { border-color: var(--good); color: var(--good); }
+  .acc-chip button { background: transparent; color: var(--muted); padding: 0 4px; font-size: 12px; }
+  .acc-chip button:hover { color: var(--bad); }
+
+  /* ---------- Live Statistics Grid ---------- */
+  .stats-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+  .stats-top h2 { margin: 0; font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-top: 8px; }
+  .metric { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+  .metric dt { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .metric dd { margin: 5px 0 2px; font: 700 21px/1.15 var(--f-mono); }
+  .metric small { display: block; color: var(--muted); font-size: 12px; }
+  .good { color: var(--good); }
+  .accent { color: var(--accent); }
+
+  /* ---------- Approval Queue & Sequential Auto-Post Loop Panel ---------- */
+  .loop-panel { background: linear-gradient(180deg, #191c26, var(--panel)); border: 1px solid #353b4d; border-radius: 16px; padding: 16px 18px; margin-top: 16px; display: grid; gap: 12px; }
+  .loop-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .loop-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .loop-title h2 { margin: 0; font-size: 16px; }
+  .loop-status { font: 600 12.5px/1.3 var(--f-mono); padding: 5px 11px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); color: var(--muted); }
+  .loop-status.on { color: var(--good); border-color: rgba(74,222,128,.45); background: #0f2117; }
+  .loop-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-top: 10px; border-top: 1px solid var(--line); }
+  .plat-checks { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .pcheck { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); font-size: 13.5px; font-weight: 600; cursor: pointer; }
+  .pcheck input { width: 17px; height: 17px; accent-color: var(--accent); margin: 0; cursor: pointer; }
+
+  /* ---------- Filter tabs & Clip Inspection List ---------- */
+  .bar-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 22px 0 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tab { min-height: 34px; padding: 0 13px; border-radius: 999px; font-size: 13px; font-weight: 600; background: var(--panel); color: var(--muted); border: 1px solid var(--line); }
+  .tab.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .list { display: grid; gap: 16px; list-style: none; padding: 0; margin: 0; }
+  .item { display: flex; gap: 18px; align-items: flex-start; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 16px; }
+  .item.is-approved { border-color: rgba(74,222,128,.45); }
+  .item.is-rejected { opacity: .68; border-color: #5b2a2a; }
+  .item video { width: 165px; aspect-ratio: 9/16; background: #000; border-radius: 10px; flex: none; object-fit: contain; }
+  .item-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+  .item-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .pills { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .pill { font: 600 11.5px/1 var(--f-mono); background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px; color: var(--muted); }
+  .pill.src-job { color: #8cc8ff; border-color: #294560; }
+  .pill.src-watcher { color: #d4a5ff; border-color: #4b3266; }
+  .pill.st-done { color: var(--good); border-color: rgba(74,222,128,.4); }
+  .pill.st-busy { color: var(--accent); border-color: rgba(255,214,10,.4); }
+  .pill.st-err { color: var(--bad); border-color: #7a3434; }
+  .pill.q-badge { background: #142b1d; color: var(--good); border-color: rgba(74,222,128,.5); }
+  .approve-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .ap-btn { min-height: 31px; padding: 0 11px; border-radius: 8px; font-size: 12.5px; font-weight: 700; border: 1px solid var(--line); background: var(--bg); color: var(--muted); }
+  .ap-btn.ap-yes.active { background: #133622; color: var(--good); border-color: var(--good); }
+  .ap-btn.ap-no.active { background: #3b1719; color: var(--bad); border-color: var(--bad); }
+  .ap-btn.ap-pend.active { background: var(--panel-2); color: var(--accent); border-color: var(--accent); }
+
+  /* ---------- Per-Card Social Platform Tabs & Platform-Specific Fields ---------- */
+  .social-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; }
+  .stabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .stab { min-height: 32px; padding: 0 12px; border-radius: 8px; font-size: 12.5px; font-weight: 700; background: var(--panel); color: var(--muted); border: 1px solid var(--line); }
+  .stab.active[data-plat="youtube"] { background: #3b1414; color: #ff9a94; border-color: var(--yt); }
+  .stab.active[data-plat="tiktok"] { background: #0d2b30; color: #7ef9ff; border-color: var(--tt); }
+  .stab.active[data-plat="instagram"] { background: #381326; color: #ff9ec0; border-color: var(--ig); }
+  .target-checks { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12.5px; }
+  .target-checks label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; font-weight: 600; }
+  .target-checks input { width: 15px; height: 15px; accent-color: var(--accent); margin: 0; }
+
+  .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .field-wide { grid-column: 1 / -1; }
+  .lbl { display: flex; justify-content: space-between; font-size: 12.5px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+  .lbl span { font-family: var(--f-mono); font-weight: 400; font-size: 11.5px; }
+  textarea.desc { min-height: 68px; resize: vertical; }
+  .payload-box { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; font-size: 12.5px; }
+  .payload-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-weight: 600; color: var(--muted); }
+  .payload-head code { font-family: var(--f-mono); color: var(--accent); font-size: 12px; }
+  .payload-box pre { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.42 var(--f-mono); color: var(--text); max-height: 190px; overflow-y: auto; }
+  .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+  .msg { font-size: 12.5px; color: var(--good); margin-left: auto; }
+  .msg.err { color: var(--bad); }
+  .live-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+  .stat-pill { font: 700 12px/1 var(--f-mono); background: #101f17; color: var(--good); border: 1px solid rgba(74,222,128,.35); border-radius: 8px; padding: 5px 8px; }
+  .empty { text-align: center; color: var(--muted); padding: 36px 20px; border: 1.5px dashed var(--line); border-radius: 16px; }
+  .spin { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #3a3f4d; border-top-color: var(--accent); animation: spin .9s linear infinite; vertical-align: -2px; margin-right: 5px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (max-width: 780px) {
+    .wiz-grid { grid-template-columns: 1fr; }
+    .item { flex-direction: column; }
+    .item video { width: 100%; max-width: 260px; align-self: center; }
+    .fields { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><i aria-hidden="true"></i>Clipsmith</div>
+    <nav class="nav" aria-label="Mode">
+      <a href="/">Video to Shorts</a>
+      <a href="/watcher"><span class="dot" id="watchDot" hidden aria-hidden="true"></span>Live Stream</a>
+      <a href="/posts" aria-current="page">Posts &amp; Socials</a>
+    </nav>
+    <div class="hdr-right" id="socialHeaderBadges">
+      <button type="button" class="sbadge" id="toggleWizardBtn">⚙️ Setup Social Tokens &amp; Accounts</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="hero">
+      <h1>Multi-Social Publisher, <em>Approval Queue</em> &amp; Live Stats</h1>
+      <p>Connect your YouTube Shorts, TikTok, and Instagram Reels tokens directly in the dashboard, inspect platform-specific fields &amp; API payloads, approve clips, and auto-post sequentially in a loop.</p>
+    </div>
+
+    <!-- 1. GUIDED SOCIAL ACCOUNTS & TOKENS SETUP WIZARD -->
+    <section class="wizard" id="wizardSection" aria-label="Social Accounts and Tokens Setup">
+      <div class="wiz-head">
+        <h2>🔑 Social Accounts &amp; Direct Token Setup Guide</h2>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span id="wizStatusMsg" style="font-size:12.5px;color:var(--good)"></span>
+          <button type="button" class="ghost" id="collapseWizBtn" style="min-height:32px;padding:0 10px;font-size:12px">Hide Setup Guide</button>
+        </div>
+      </div>
+
+      <div class="wiz-tabs" role="tablist">
+        <button type="button" class="wtab active" data-wiz-tab="youtube">▶ YouTube Shorts <span id="wCountYt"></span></button>
+        <button type="button" class="wtab" data-wiz-tab="tiktok">♪ TikTok Content API <span id="wCountTt"></span></button>
+        <button type="button" class="wtab" data-wiz-tab="instagram">◎ Instagram Reels API <span id="wCountIg"></span></button>
+      </div>
+
+      <!-- YouTube Setup Tab -->
+      <div class="wiz-pane" data-wiz-pane="youtube">
+        <div class="wiz-grid">
+          <div class="guide-box">
+            <h3>How to get your YouTube OAuth Client ID &amp; Secret</h3>
+            <ol>
+              <li>Open <a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener">Google Cloud Console → YouTube Data API v3</a> and click <b>Enable</b>.</li>
+              <li>Go to <b>APIs &amp; Services → OAuth consent screen</b>, choose <b>External</b>, and add your Google email under <b>Test users</b>.</li>
+              <li>Go to <b>APIs &amp; Services → Credentials → + Create Credentials → OAuth client ID</b>.</li>
+              <li>Choose Application type: <b>Desktop app</b> (or Web application with Redirect URI <code>http://127.0.0.1:8765/</code>).</li>
+              <li>Paste your <b>Client ID</b> and <b>Client Secret</b> on the right → click <b>Save Credentials</b>, then click <b>+ Connect YouTube Channel</b>.</li>
+            </ol>
+          </div>
+          <div class="form-box">
+            <div class="form-row">
+              <div>
+                <label class="lbl">YOUTUBE_CLIENT_ID</label>
+                <input type="text" id="ytClientId" placeholder="123456789-abc.apps.googleusercontent.com">
+              </div>
+              <div>
+                <label class="lbl">YOUTUBE_CLIENT_SECRET</label>
+                <input type="password" id="ytClientSecret" placeholder="GOCSPX-your_client_secret">
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <button type="button" class="ghost" id="saveYtCredsBtn">1. Save Client ID &amp; Secret to .env</button>
+              <a class="go" id="connectYtBtn" href="/api/youtube/connect?next=/posts" style="display:inline-flex;align-items:center;text-decoration:none">2. + Connect YouTube Channel (OAuth)</a>
+            </div>
+            <div>
+              <label class="lbl">Connected YouTube Channels</label>
+              <div class="acc-list" id="ytAccList"><span style="color:var(--muted);font-size:13px">No YouTube channels connected yet.</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TikTok Setup Tab -->
+      <div class="wiz-pane" data-wiz-pane="tiktok" hidden>
+        <div class="wiz-grid">
+          <div class="guide-box">
+            <h3>How to get your TikTok Content Posting API v2 Token</h3>
+            <ol>
+              <li>Open <a href="https://developers.tiktok.com/" target="_blank" rel="noopener">TikTok for Developers</a> → create an App and enable the <b>Content Posting API</b> product.</li>
+              <li>Request scopes <code>video.publish</code> (Direct Post) and <code>video.upload</code> (Inbox Draft).</li>
+              <li>Generate a User <b>Access Token</b> (`act.xxxx...`) via TikTok OAuth or Sandbox token generator.</li>
+              <li>Paste your account handle (e.g. <code>@kreekclips</code>) and <b>Access Token</b> on the right to post directly from this dashboard.</li>
+            </ol>
+          </div>
+          <div class="form-box">
+            <div class="form-row">
+              <div>
+                <label class="lbl">TikTok Account Handle / Label *</label>
+                <input type="text" id="ttTitle" placeholder="@kreekcraft_gta6">
+              </div>
+              <div>
+                <label class="lbl">Open ID (optional)</label>
+                <input type="text" id="ttOpenId" placeholder="open_id (optional)">
+              </div>
+            </div>
+            <div>
+              <label class="lbl">TikTok OAuth Access Token (`video.publish` / `video.upload`) *</label>
+              <input type="password" id="ttAccessToken" placeholder="act.example_tiktok_access_token...">
+            </div>
+            <div class="form-row">
+              <div>
+                <label class="lbl">Refresh Token (optional)</label>
+                <input type="password" id="ttRefreshToken" placeholder="rft.optional...">
+              </div>
+              <div>
+                <label class="lbl">Client Key (optional)</label>
+                <input type="text" id="ttClientKey" placeholder="awoptional...">
+              </div>
+            </div>
+            <div>
+              <button type="button" class="go" id="saveTtAccBtn">+ Save &amp; Connect TikTok Account</button>
+            </div>
+            <div>
+              <label class="lbl">Connected TikTok Accounts</label>
+              <div class="acc-list" id="ttAccList"><span style="color:var(--muted);font-size:13px">No TikTok accounts connected yet.</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Instagram Reels Setup Tab -->
+      <div class="wiz-pane" data-wiz-pane="instagram" hidden>
+        <div class="wiz-grid">
+          <div class="guide-box">
+            <h3>How to get your Instagram Reels Graph API Token</h3>
+            <ol>
+              <li>Switch your Instagram account to a <b>Creator</b> or <b>Business</b> account linked to a Facebook Page.</li>
+              <li>Open <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener">Meta Graph API Explorer</a> and select your App.</li>
+              <li>Add permissions: <code>instagram_basic</code>, <code>instagram_content_publish</code>, and <code>pages_read_engagement</code>.</li>
+              <li>Query <code>GET /me/accounts?fields=instagram_business_account{id,username}</code> to copy your 17-digit <b>IG User ID</b> (`ig_user_id`).</li>
+              <li>Paste your Handle, <b>IG User ID</b>, and <b>Access Token</b> on the right.</li>
+            </ol>
+          </div>
+          <div class="form-box">
+            <div class="form-row">
+              <div>
+                <label class="lbl">Instagram Handle / Label *</label>
+                <input type="text" id="igTitle" placeholder="@kreekreels">
+              </div>
+              <div>
+                <label class="lbl">IG Business/Creator User ID (`ig_user_id`) *</label>
+                <input type="text" id="igUserId" placeholder="17841400000000000">
+              </div>
+            </div>
+            <div>
+              <label class="lbl">Meta Graph API Access Token (`instagram_content_publish`) *</label>
+              <input type="password" id="igAccessToken" placeholder="EAABwzLixnjYBO...">
+            </div>
+            <div>
+              <button type="button" class="go" id="saveIgAccBtn">+ Save &amp; Connect Instagram Reels Account</button>
+            </div>
+            <div>
+              <label class="lbl">Connected Instagram Accounts</label>
+              <div class="acc-list" id="igAccList"><span style="color:var(--muted);font-size:13px">No Instagram accounts connected yet.</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. LIVE STATISTICS TRACKER -->
+    <div class="stats-top">
+      <h2>Live Statistics &amp; Campaign Tracker</h2>
+      <button type="button" class="ghost" id="refreshStatsBtn" style="min-height:32px;padding:0 12px;font-size:12px">↻ Refresh Live Stats</button>
+    </div>
+    <dl class="metrics" aria-label="Live statistics">
+      <div class="metric">
+        <dt>Total Clips</dt>
+        <dd id="sTotal">0</dd>
+        <small id="sTotalSub">0 pending · 0 approved</small>
+      </div>
+      <div class="metric">
+        <dt>Approved Queue</dt>
+        <dd id="sApproved" class="accent">0</dd>
+        <small id="sQueueSub">0 queued · 0 uploading</small>
+      </div>
+      <div class="metric">
+        <dt>Posted Clips</dt>
+        <dd id="sPosted" class="good">0</dd>
+        <small id="sFailedSub">0 failed</small>
+      </div>
+      <div class="metric">
+        <dt>Live Views</dt>
+        <dd id="sViews">0</dd>
+        <small>Across posted Shorts</small>
+      </div>
+      <div class="metric">
+        <dt>Live Likes &amp; Comments</dt>
+        <dd id="sLikes">0</dd>
+        <small id="sCommentsSub">0 comments · Likes visible</small>
+      </div>
+      <div class="metric">
+        <dt>Campaign Engagement</dt>
+        <dd id="sComments">0%</dd>
+        <small id="sUpdated">Target &gt;= 0.8% · Est. $0.00</small>
+      </div>
+    </dl>
+
+    <!-- 3. APPROVAL SECTION & SEQUENTIAL AUTO-POST LOOP CONTROLLER -->
+    <section class="loop-panel" aria-label="Approval Queue and Sequential Auto-Post Loop">
+      <div class="loop-top">
+        <div class="loop-title">
+          <h2>🔁 Approve &amp; Sequential Auto-Post Loop</h2>
+          <span class="loop-status" id="loopStatusBadge">Idle</span>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" class="ghost" id="approveAllBtn">✓ Approve All Pending Clips</button>
+          <button type="button" class="go" id="loopToggleBtn">▶ Start Sequential Auto-Post Loop</button>
+        </div>
+      </div>
+
+      <div class="loop-controls">
+        <div class="plat-checks" aria-label="Target socials for sequential loop">
+          <span style="font-size:13px;font-weight:700;color:var(--muted)">Loop Target Socials:</span>
+          <label class="pcheck"><input type="checkbox" value="youtube" class="loop-plat" checked> ▶ YouTube Shorts</label>
+          <label class="pcheck"><input type="checkbox" value="tiktok" class="loop-plat"> ♪ TikTok</label>
+          <label class="pcheck"><input type="checkbox" value="instagram" class="loop-plat"> ◎ Instagram Reels</label>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)">
+            Delay between clips:
+            <select id="loopDelay" style="width:auto;min-height:34px;padding:4px 10px;font-size:13px">
+              <option value="0">0s (Immediate sequence)</option>
+              <option value="10" selected>10 seconds</option>
+              <option value="30">30 seconds</option>
+              <option value="120">2 minutes</option>
+              <option value="600">10 minutes</option>
+              <option value="1800">30 minutes</option>
+            </select>
+          </label>
+          <label style="display:inline-flex;align-items:center;gap:7px;font-size:13px;cursor:pointer">
+            <input type="checkbox" id="loopAutoApprove" style="width:17px;height:17px;accent-color:var(--accent)">
+            Auto-approve new incoming clips
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. FILTER TABS & CLIP CARDS -->
+    <div class="bar-head">
+      <div class="tabs" role="tablist" aria-label="Filter clips">
+        <button type="button" class="tab active" data-filter="all">All Clips</button>
+        <button type="button" class="tab" data-filter="pending">Pending Approval</button>
+        <button type="button" class="tab" data-filter="approved">✓ Approved Queue</button>
+        <button type="button" class="tab" data-filter="busy">Uploading</button>
+        <button type="button" class="tab" data-filter="done">Posted</button>
+        <button type="button" class="tab" data-filter="rejected">✗ Rejected</button>
+      </div>
+      <span id="showingCount" style="color:var(--muted);font:500 13px var(--f-mono)">0 clips</span>
+    </div>
+
+    <ul class="list" id="list"></ul>
+  </main>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => Array.from(document.querySelectorAll(s));
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+let snapshot = { socials: {}, loop: {}, summary: {}, auto_post: {}, items: [] };
+let currentFilter = "all";
+// Remember which platform tab ("youtube" | "tiktok" | "instagram") is active on each clip card
+const cardActivePlatform = {};
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
+  return data;
+}
+
+/* ---------- Wizard Tabs & Account Management ---------- */
+$$("[data-wiz-tab]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    $$("[data-wiz-tab]").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    const t = btn.dataset.wizTab;
+    $$("[data-wiz-pane]").forEach((p) => { p.hidden = p.dataset.wizPane !== t; });
+  });
+});
+
+$("#toggleWizardBtn").addEventListener("click", () => {
+  const w = $("#wizardSection");
+  w.hidden = !w.hidden;
+});
+$("#collapseWizBtn").addEventListener("click", () => {
+  $("#wizardSection").hidden = true;
+});
+
+function showWizMsg(text, isErr = false) {
+  const el = $("#wizStatusMsg");
+  el.style.color = isErr ? "var(--bad)" : "var(--good)";
+  el.textContent = text;
+}
+
+$("#saveYtCredsBtn").addEventListener("click", async () => {
+  const client_id = $("#ytClientId").value.trim();
+  const client_secret = $("#ytClientSecret").value.trim();
+  if (!client_id || !client_secret) {
+    showWizMsg("Enter both YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET.", true);
+    return;
+  }
+  try {
+    await api("/api/socials/youtube-credentials", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id, client_secret }),
+    });
+    $("#ytClientId").value = "";
+    $("#ytClientSecret").value = "";
+    showWizMsg("Saved YouTube Client ID & Secret to .env! Now click '2. + Connect YouTube Channel'.");
+    lastStructSig = "";
+    await refresh();
+  } catch (e) {
+    showWizMsg(e.message, true);
+  }
+});
+
+$("#saveTtAccBtn").addEventListener("click", async () => {
+  try {
+    await api("/api/socials/accounts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        platform: "tiktok",
+        title: $("#ttTitle").value.trim(),
+        open_id: $("#ttOpenId").value.trim(),
+        access_token: $("#ttAccessToken").value.trim(),
+        refresh_token: $("#ttRefreshToken").value.trim(),
+        client_key: $("#ttClientKey").value.trim(),
+      }),
+    });
+    $("#ttAccessToken").value = "";
+    $("#ttRefreshToken").value = "";
+    showWizMsg("TikTok account connected!");
+    lastStructSig = "";
+    await refresh();
+  } catch (e) {
+    showWizMsg(e.message, true);
+  }
+});
+
+$("#saveIgAccBtn").addEventListener("click", async () => {
+  try {
+    await api("/api/socials/accounts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        platform: "instagram",
+        title: $("#igTitle").value.trim(),
+        ig_user_id: $("#igUserId").value.trim(),
+        access_token: $("#igAccessToken").value.trim(),
+      }),
+    });
+    $("#igAccessToken").value = "";
+    showWizMsg("Instagram Reels account connected!");
+    lastStructSig = "";
+    await refresh();
+  } catch (e) {
+    showWizMsg(e.message, true);
+  }
+});
+
+window.selectSocialAcc = async (platform, account_id) => {
+  try {
+    await api("/api/socials/select", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ platform, account_id }),
+    });
+    lastStructSig = "";
+    await refresh();
+  } catch (e) {
+    alert(e.message);
+  }
+};
+
+window.removeSocialAcc = async (platform, account_id, title) => {
+  if (!confirm(`Disconnect ${platform} account "${title}"?`)) return;
+  try {
+    await api(`/api/socials/accounts/${encodeURIComponent(platform)}?account_id=${encodeURIComponent(account_id)}`, {
+      method: "DELETE",
+    });
+    lastStructSig = "";
+    await refresh();
+  } catch (e) {
+    alert(e.message);
+  }
+};
+
+function renderSocialSetup(soc) {
+  const yt = soc.youtube || { accounts: [] };
+  const tt = soc.tiktok || { accounts: [] };
+  const ig = soc.instagram || { accounts: [] };
+
+  $("#wCountYt").textContent = yt.connected ? `(${yt.accounts.length || 1} connected)` : "(setup)";
+  $("#wCountTt").textContent = tt.connected ? `(${tt.accounts.length} connected)` : "(setup)";
+  $("#wCountIg").textContent = ig.connected ? `(${ig.accounts.length} connected)` : "(setup)";
+
+  const fmtList = (plat, list) => {
+    if (!list || !list.length) return `<span style="color:var(--muted);font-size:13px">No ${plat} accounts connected yet.</span>`;
+    return list.map((a) => `
+      <span class="acc-chip ${a.active ? "active" : ""}">
+        <span style="cursor:pointer" onclick="selectSocialAcc('${plat}','${esc(a.id)}')">${a.active ? "● " : "○ "}<b>${esc(a.title)}</b>${a.ig_user_id ? ` (${esc(a.ig_user_id)})` : ""}</span>
+        <button type="button" title="Disconnect" onclick="removeSocialAcc('${plat}','${esc(a.id)}','${esc(a.title)}')">✕</button>
+      </span>
+    `).join("");
+  };
+
+  const ytList = (yt.accounts && yt.accounts.length)
+    ? yt.accounts
+    : (yt.connected && yt.channel ? [{ id: yt.channel.id || "default", title: yt.channel.title || "Connected", active: true }] : []);
+  $("#ytAccList").innerHTML = fmtList("youtube", ytList);
+  $("#ttAccList").innerHTML = fmtList("tiktok", tt.accounts || []);
+  $("#igAccList").innerHTML = fmtList("instagram", ig.accounts || []);
+
+  // Top header quick status pills
+  const hdr = $("#socialHeaderBadges");
+  const pill = (label, st) => `<span class="sbadge ${st.connected ? "on" : ""}" onclick="$('#wizardSection').hidden=false"><span class="sdot ${st.connected ? "on" : ""}"></span>${label}: <b>${st.connected ? ((st.accounts && st.accounts.find((x) => x.active)?.title) || (st.channel && st.channel.title) || "Connected") : "Setup"}</b></span>`;
+  hdr.innerHTML = `
+    ${pill("YT", yt)}
+    ${pill("TikTok", tt)}
+    ${pill("IG", ig)}
+    <button type="button" class="sbadge" onclick="$('#wizardSection').hidden=!$('#wizardSection').hidden">⚙️ Tokens Setup</button>
+  `;
+}
+
+/* ---------- Summary & Loop State Rendering ---------- */
+function renderSummaryAndLoop(s, loop) {
+  $("#sTotal").textContent = String(s.total_clips || 0);
+  $("#sTotalSub").textContent = `${s.pending_approval_count || 0} pending · ${s.approved_count || 0} approved`;
+  $("#sApproved").textContent = String(s.approved_unposted_count || 0);
+  $("#sQueueSub").textContent = `${s.queued_count || 0} queued · ${s.uploading_count || 0} uploading`;
+  $("#sPosted").textContent = String(s.posted_count || 0);
+  $("#sFailedSub").textContent = `${s.failed_count || 0} failed · ${s.rejected_count || 0} rejected`;
+  $("#sViews").textContent = (s.total_views || 0).toLocaleString();
+  $("#sLikes").textContent = (s.total_likes || 0).toLocaleString();
+  $("#sCommentsSub").textContent = `${(s.total_comments || 0).toLocaleString()} comments · Likes visible`;
+  const eng = s.overall_engagement_rate || 0;
+  const payout = (s.estimated_payout_usd || 0).toFixed(2);
+  $("#sComments").textContent = `${eng}%`;
+  $("#sComments").className = eng >= 0.8 ? "good" : "";
+  $("#sUpdated").textContent = `Target >= 0.8% · Est. $${payout} ($1/1K)`;
+
+  const badge = $("#loopStatusBadge");
+  const btn = $("#loopToggleBtn");
+  const running = !!loop.running;
+  badge.className = "loop-status" + (running ? " on" : "");
+  badge.textContent = loop.status_text || (running ? "Running sequential loop..." : "Idle");
+  btn.className = running ? "go stop" : "go";
+  btn.textContent = running ? "⏹ Stop Sequential Loop" : "▶ Start Sequential Auto-Post Loop";
+
+  if (!document.querySelector(".loop-panel").contains(document.activeElement)) {
+    if (Array.isArray(loop.platforms)) {
+      $$(".loop-plat").forEach((cb) => { cb.checked = loop.platforms.includes(cb.value); });
+    }
+    if (typeof loop.delay_seconds === "number") {
+      $("#loopDelay").value = String(loop.delay_seconds);
+    }
+    $("#loopAutoApprove").checked = !!loop.auto_approve_new;
+  }
+}
+
+/* ---------- Sequential Loop & Bulk Approval Controls ---------- */
+async function syncLoopSettings(toggleRun = null) {
+  const running = toggleRun !== null ? toggleRun : !!(snapshot.loop && snapshot.loop.running);
+  const platforms = $$(".loop-plat").filter((c) => c.checked).map((c) => c.value);
+  if (!platforms.length) {
+    alert("Select at least one target social platform (YouTube Shorts, TikTok, or Instagram Reels).");
+    return;
+  }
+  try {
+    await api("/api/posts/loop", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        running,
+        platforms,
+        delay_seconds: Number($("#loopDelay").value || 10),
+        auto_approve_new: $("#loopAutoApprove").checked,
+      }),
+    });
+    lastStructSig = "";
+    await refresh();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+$("#loopToggleBtn").addEventListener("click", () => {
+  const currentlyRunning = !!(snapshot.loop && snapshot.loop.running);
+  syncLoopSettings(!currentlyRunning);
+});
+$("#loopDelay").addEventListener("change", () => { if (snapshot.loop?.running) syncLoopSettings(true); });
+$("#loopAutoApprove").addEventListener("change", () => syncLoopSettings(!!snapshot.loop?.running));
+$$(".loop-plat").forEach((cb) => cb.addEventListener("change", () => { if (snapshot.loop?.running) syncLoopSettings(true); }));
+
+$("#approveAllBtn").addEventListener("click", async () => {
+  try {
+    await api("/api/posts/approve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ approve_all_pending: true }),
+    });
+    lastStructSig = "";
+    await refresh();
+  } catch (e) {
+    alert(e.message);
+  }
+});
+
+/* ---------- Clip State & Card List Rendering ---------- */
+function itemOverallState(it) {
+  const sts = ["youtube", "tiktok", "instagram"].map((p) => (it[p] || {}).status).filter(Boolean);
+  if (sts.includes("uploading") || sts.includes("queued")) return "busy";
+  if (sts.includes("done")) return "done";
+  if (sts.includes("error")) return "error";
+  return "ready";
+}
+
+function platBadgeHtml(it, plat, label) {
+  const info = it[plat] || {};
+  const st = info.status;
+  if (st === "done") return `<span class="pill st-done">✓ ${label}</span>`;
+  if (st === "uploading" || st === "queued") return `<span class="pill st-busy"><span class="spin"></span>${label} ${info.progress || 0}%</span>`;
+  if (st === "error") return `<span class="pill st-err" title="${esc(info.error || "")}">✗ ${label} err</span>`;
+  return "";
+}
+
+let lastStructSig = "";
+function renderList() {
+  if ($("#list").contains(document.activeElement) && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) {
+    return;
+  }
+
+  const filtered = (snapshot.items || []).filter((it) => {
+    const st = itemOverallState(it);
+    const ap = it.approval_status || "pending";
+    if (currentFilter === "all") return true;
+    if (currentFilter === "pending") return ap === "pending";
+    if (currentFilter === "approved") return ap === "approved";
+    if (currentFilter === "rejected") return ap === "rejected";
+    return st === currentFilter;
+  });
+  $("#showingCount").textContent = `${filtered.length} clip${filtered.length === 1 ? "" : "s"}`;
+
+  const sig = currentFilter + "::" + JSON.stringify(cardActivePlatform) + "::" + filtered.map((it) =>
+    `${it.key}:${it.approval_status}:${it.queue_position}:${(it.target_platforms || []).join(",")}:${it.title}:${it.description}:${(it.hashtags || []).join(",")}:${it.privacy}:${JSON.stringify(it.tiktok_options)}:${JSON.stringify(it.instagram_options)}:${JSON.stringify(it.youtube)}:${JSON.stringify(it.tiktok)}:${JSON.stringify(it.instagram)}:${JSON.stringify(it.live_stats)}`
+  ).join("|");
+  if (sig === lastStructSig) return;
+  lastStructSig = sig;
+
+  const list = $("#list");
+  if (!filtered.length) {
+    list.innerHTML = `<li class="empty">No clips match this filter.</li>`;
+    return;
+  }
+
+  const soc = snapshot.socials || {};
+  const ytAccs = (soc.youtube?.accounts?.length) ? soc.youtube.accounts : (soc.youtube?.channel ? [{ id: soc.youtube.channel.id || "default", title: soc.youtube.channel.title, active: true }] : []);
+  const ttAccs = soc.tiktok?.accounts || [];
+  const igAccs = soc.instagram?.accounts || [];
+
+  list.innerHTML = filtered.map((it) => {
+    const activePlat = cardActivePlatform[it.key] || "youtube";
+    const ap = it.approval_status || "pending";
+    const tPlats = it.target_platforms || ["youtube"];
+    const busy = itemOverallState(it) === "busy";
+    const tagsStr = (it.hashtags || ["GTA6", "KreekCraft", "GrandTheftAutoVI"]).map((t) => "#" + String(t).replace(/^#+/, "")).join(" ");
+    const ttOpts = it.tiktok_options || {};
+    const igOpts = it.instagram_options || {};
+    const payloads = it.payloads || {};
+    const activePayloadObj = payloads[activePlat] || {};
+
+    const ls = it.live_stats;
+    const y = it.youtube || {};
+    const tt = it.tiktok || {};
+    const ig = it.instagram || {};
+    const linksHtml = [
+      y.status === "done" && y.url ? `<a class="ghost" style="min-height:26px;padding:0 9px;font-size:12px" href="${esc(y.url)}" target="_blank" rel="noopener">YouTube ↗</a>` : "",
+      tt.status === "done" && tt.url ? `<a class="ghost" style="min-height:26px;padding:0 9px;font-size:12px" href="${esc(tt.url)}" target="_blank" rel="noopener">TikTok ↗</a>` : "",
+      ig.status === "done" && ig.url ? `<a class="ghost" style="min-height:26px;padding:0 9px;font-size:12px" href="${esc(ig.url)}" target="_blank" rel="noopener">Instagram ↗</a>` : "",
+    ].filter(Boolean).join("");
+
+    const statsHtml = (ls || linksHtml) ? `
+      <div class="live-badges">
+        ${ls ? `<span class="stat-pill">👁 ${ls.views.toLocaleString()}</span><span class="stat-pill">👍 ${ls.likes.toLocaleString()}</span><span class="stat-pill">💬 ${ls.comments.toLocaleString()}</span><span class="stat-pill">${ls.engagement_rate || 0}% · $${(ls.estimated_payout_usd || 0).toFixed(2)}</span>` : ""}
+        ${linksHtml}
+      </div>` : "";
+
+    const defaultCombinedCaption = (payloads.tiktok?.body?.post_info?.title) || `${it.description || ""}\n\n${tagsStr}`.trim();
+
+    const comp = it.compliance;
+    const compBadge = comp
+      ? (comp.compliant
+          ? `<span class="pill st-done" title="Logo overlay: OK · CTA: OK · Hashtags: OK · No links: OK">✓ Campaign Rules Compliant</span>`
+          : `<span class="pill st-err" title="Check CTA, hashtags, no URLs, and logo overlay">⚠ Check Campaign Rules</span>`)
+      : "";
+
+    return `
+    <li class="item ${ap === "approved" ? "is-approved" : ap === "rejected" ? "is-rejected" : ""}" data-key="${esc(it.key)}">
+      <video src="${esc(it.video)}" controls preload="metadata" playsinline></video>
+      <div class="item-body">
+        <div class="item-top">
+          <div class="pills">
+            <span class="pill ${it.source === "job" ? "src-job" : "src-watcher"}">${esc(it.source_label)}</span>
+            <span class="pill">${esc(it.name)}</span>
+            ${compBadge}
+            ${it.queue_position ? `<span class="pill q-badge">Loop Queue #${it.queue_position}</span>` : ""}
+            ${platBadgeHtml(it, "youtube", "YT")}
+            ${platBadgeHtml(it, "tiktok", "TikTok")}
+            ${platBadgeHtml(it, "instagram", "IG")}
+          </div>
+          <div class="approve-bar">
+            <button type="button" class="ap-btn ap-yes ${ap === "approved" ? "active" : ""}" data-act="approve" data-val="approved">✓ Approved</button>
+            <button type="button" class="ap-btn ap-pend ${ap === "pending" ? "active" : ""}" data-act="approve" data-val="pending">● Pending</button>
+            <button type="button" class="ap-btn ap-no ${ap === "rejected" ? "active" : ""}" data-act="approve" data-val="rejected">✗ Reject</button>
+          </div>
+        </div>
+
+        ${statsHtml}
+
+        <!-- Per-card Social Platform Selector & Target Checkboxes -->
+        <div class="social-bar">
+          <div class="stabs" role="tablist" aria-label="Inspect social platform fields">
+            <button type="button" class="stab ${activePlat === "youtube" ? "active" : ""}" data-act="switch-plat" data-plat="youtube">▶ YouTube Shorts Fields</button>
+            <button type="button" class="stab ${activePlat === "tiktok" ? "active" : ""}" data-act="switch-plat" data-plat="tiktok">♪ TikTok Fields</button>
+            <button type="button" class="stab ${activePlat === "instagram" ? "active" : ""}" data-act="switch-plat" data-plat="instagram">◎ Instagram Reels Fields</button>
+          </div>
+          <div class="target-checks">
+            <span style="color:var(--muted)">Post to:</span>
+            <label><input type="checkbox" data-target-plat="youtube" ${tPlats.includes("youtube") ? "checked" : ""}> YouTube</label>
+            <label><input type="checkbox" data-target-plat="tiktok" ${tPlats.includes("tiktok") ? "checked" : ""}> TikTok</label>
+            <label><input type="checkbox" data-target-plat="instagram" ${tPlats.includes("instagram") ? "checked" : ""}> Instagram</label>
+          </div>
+        </div>
+
+        <!-- YOUTUBE SHORTS FIELDS -->
+        <div class="fields" data-plat-pane="youtube" ${activePlat === "youtube" ? "" : "hidden"}>
+          <div class="field-wide">
+            <label class="lbl">YouTube Shorts Title <span>${(it.title || "").length}/100 chars</span></label>
+            <input type="text" data-field="title" maxlength="100" value="${esc(it.title || "")}">
+          </div>
+          <div class="field-wide">
+            <label class="lbl">YouTube Description / Campaign Caption <span>${(it.preview?.description_bytes) || 0}/5000 bytes</span></label>
+            <textarea class="desc" data-field="description" maxlength="4500">${esc(it.description || "")}</textarea>
+          </div>
+          <div>
+            <label class="lbl">Hashtags <span>#GTA6 #KreekCraft #GrandTheftAutoVI</span></label>
+            <input type="text" data-field="hashtags" value="${esc(tagsStr)}">
+          </div>
+          <div>
+            <label class="lbl">YouTube Visibility</label>
+            <select data-field="privacy">
+              <option value="public" ${it.privacy === "public" ? "selected" : ""}>Public</option>
+              <option value="unlisted" ${it.privacy === "unlisted" ? "selected" : ""}>Unlisted</option>
+              <option value="private" ${it.privacy === "private" ? "selected" : ""}>Private</option>
+            </select>
+          </div>
+          <div>
+            <label class="lbl">Target YouTube Channel</label>
+            <select data-field="account_id">
+              ${ytAccs.length ? ytAccs.map((a) => `<option value="${esc(a.id)}" ${(it.account_id ? it.account_id === a.id : a.active) ? "selected" : ""}>${esc(a.title)}</option>`).join("") : `<option value="">Default channel (Connect in Setup)</option>`}
+            </select>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:5px;justify-content:center;padding-top:10px">
+            <label style="display:inline-flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer">
+              <input type="checkbox" data-field="notify_subscribers" ${it.notify_subscribers !== false ? "checked" : ""} style="width:15px;height:15px;accent-color:var(--accent)">
+              Notify channel subscribers
+            </label>
+            <label style="display:inline-flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer">
+              <input type="checkbox" data-field="made_for_kids" ${it.made_for_kids ? "checked" : ""} style="width:15px;height:15px;accent-color:var(--accent)">
+              Made for kids (selfDeclaredMadeForKids)
+            </label>
+            <label style="display:inline-flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer">
+              <input type="checkbox" data-field="add_source_link" ${it.add_source_link ? "checked" : ""} style="width:15px;height:15px;accent-color:var(--accent)">
+              Append source URL (Keep OFF for KreekCraft campaign)
+            </label>
+          </div>
+        </div>
+
+        <!-- TIKTOK CONTENT POSTING API v2 FIELDS -->
+        <div class="fields" data-plat-pane="tiktok" ${activePlat === "tiktok" ? "" : "hidden"}>
+          <div class="field-wide">
+            <label class="lbl">TikTok Post Caption (includes CTA + Hashtags, No URLs) <span>max 2200 chars</span></label>
+            <textarea class="desc" data-field="tt_caption" maxlength="2200">${esc(ttOpts.caption || defaultCombinedCaption)}</textarea>
+          </div>
+          <div>
+            <label class="lbl">TikTok Privacy Level (<code>privacy_level</code>)</label>
+            <select data-field="tt_privacy_level">
+              <option value="PUBLIC_TO_EVERYONE" ${(ttOpts.privacy_level || "PUBLIC_TO_EVERYONE") === "PUBLIC_TO_EVERYONE" ? "selected" : ""}>PUBLIC_TO_EVERYONE</option>
+              <option value="MUTUAL_FOLLOW_FRIENDS" ${ttOpts.privacy_level === "MUTUAL_FOLLOW_FRIENDS" ? "selected" : ""}>MUTUAL_FOLLOW_FRIENDS</option>
+              <option value="SELF_ONLY" ${ttOpts.privacy_level === "SELF_ONLY" ? "selected" : ""}>SELF_ONLY (Private)</option>
+            </select>
+          </div>
+          <div>
+            <label class="lbl">TikTok Post Mode (<code>post_mode</code>)</label>
+            <select data-field="tt_post_mode">
+              <option value="DIRECT_POST" ${(ttOpts.post_mode || "DIRECT_POST") === "DIRECT_POST" ? "selected" : ""}>DIRECT_POST (Publish straight to feed)</option>
+              <option value="MEDIA_UPLOAD" ${ttOpts.post_mode === "MEDIA_UPLOAD" ? "selected" : ""}>MEDIA_UPLOAD (Send to TikTok App Inbox)</option>
+            </select>
+          </div>
+          <div>
+            <label class="lbl">Target TikTok Account</label>
+            <select data-field="tt_account_id">
+              ${ttAccs.length ? ttAccs.map((a) => `<option value="${esc(a.id)}" ${(ttOpts.account_id ? ttOpts.account_id === a.id : a.active) ? "selected" : ""}>${esc(a.title)}</option>`).join("") : `<option value="">Default TikTok account (Add token above)</option>`}
+            </select>
+          </div>
+          <div>
+            <label class="lbl">Cover Frame Timestamp (<code>video_cover_timestamp_ms</code>)</label>
+            <input type="number" data-field="tt_cover_ms" min="0" step="100" value="${Number(ttOpts.cover_timestamp_ms ?? 1000)}">
+          </div>
+          <div class="field-wide" style="display:flex;gap:16px;flex-wrap:wrap">
+            <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer">
+              <input type="checkbox" data-field="tt_allow_comment" ${ttOpts.allow_comment !== false ? "checked" : ""} style="width:15px;height:15px;accent-color:var(--accent)"> Allow Comments
+            </label>
+            <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer">
+              <input type="checkbox" data-field="tt_allow_duet" ${ttOpts.allow_duet !== false ? "checked" : ""} style="width:15px;height:15px;accent-color:var(--accent)"> Allow Duet
+            </label>
+            <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer">
+              <input type="checkbox" data-field="tt_allow_stitch" ${ttOpts.allow_stitch !== false ? "checked" : ""} style="width:15px;height:15px;accent-color:var(--accent)"> Allow Stitch
+            </label>
+          </div>
+        </div>
+
+        <!-- INSTAGRAM REELS GRAPH API FIELDS -->
+        <div class="fields" data-plat-pane="instagram" ${activePlat === "instagram" ? "" : "hidden"}>
+          <div class="field-wide">
+            <label class="lbl">Instagram Reels Caption (includes CTA + Hashtags, No URLs) <span>max 2200 chars</span></label>
+            <textarea class="desc" data-field="ig_caption" maxlength="2200">${esc(igOpts.caption || defaultCombinedCaption)}</textarea>
+          </div>
+          <div>
+            <label class="lbl">Target Instagram Creator/Business Account</label>
+            <select data-field="ig_account_id">
+              ${igAccs.length ? igAccs.map((a) => `<option value="${esc(a.id)}" ${(igOpts.account_id ? igOpts.account_id === a.id : a.active) ? "selected" : ""}>${esc(a.title)} (${esc(a.ig_user_id || "")})</option>`).join("") : `<option value="">Default IG account (Add token above)</option>`}
+            </select>
+          </div>
+          <div>
+            <label class="lbl">Original Audio Name (<code>audio_name</code>)</label>
+            <input type="text" data-field="ig_audio_name" maxlength="100" value="${esc(igOpts.audio_name || "KreekCraft GTA 6 Live")}">
+          </div>
+          <div>
+            <label class="lbl">Thumbnail Offset (<code>thumb_offset</code> in ms)</label>
+            <input type="number" data-field="ig_thumb_offset_ms" min="0" step="100" value="${Number(igOpts.thumb_offset_ms ?? 1000)}">
+          </div>
+          <div style="display:flex;align-items:center;padding-top:18px">
+            <label style="display:inline-flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer">
+              <input type="checkbox" data-field="ig_share_to_feed" ${igOpts.share_to_feed !== false ? "checked" : ""} style="width:15px;height:15px;accent-color:var(--accent)">
+              Share Reel to main profile feed (<code>share_to_feed</code>)
+            </label>
+          </div>
+        </div>
+
+        <!-- DYNAMIC PLATFORM-DEPENDENT API PAYLOAD PREVIEW -->
+        <div class="payload-box">
+          <div class="payload-head">
+            <span>Active Platform Payload (${activePlat.toUpperCase()})</span>
+            <code>${esc(activePayloadObj.endpoint || "")}</code>
+          </div>
+          <pre>${esc(JSON.stringify(activePayloadObj.body || {}, null, 2))}</pre>
+        </div>
+
+        <div class="actions">
+          <button type="button" class="ghost" data-act="save" ${busy ? "disabled" : ""}>Save All Fields</button>
+          ${it.source === "watcher" ? `<button type="button" class="ghost" data-act="ai" ${busy ? "disabled" : ""}>✨ AI Rewrite</button>` : ""}
+          <button type="button" class="ghost" data-act="post-active" data-plat="${esc(activePlat)}" ${busy ? "disabled" : ""}>Post to ${activePlat === "youtube" ? "YouTube" : activePlat === "tiktok" ? "TikTok" : "Instagram"} Only</button>
+          <button type="button" class="go" data-act="post-selected" ${busy ? "disabled" : ""}>🚀 Post to Checked Socials (${tPlats.join(" + ")})</button>
+          <a class="ghost" href="${esc(it.video)}" download="${esc(it.name)}">Download MP4</a>
+          <span class="msg" data-msg></span>
+        </div>
+      </div>
+    </li>`;
+  }).join("");
+}
+
+function readCardFields(li, it) {
+  const get = (f) => li.querySelector(`[data-field="${f}"]`);
+  const tagsRaw = (get("hashtags")?.value || "").split(/[\s,]+/).map((t) => t.replace(/^#+/, "")).filter(Boolean);
+  const target_platforms = Array.from(li.querySelectorAll("[data-target-plat]")).filter((c) => c.checked).map((c) => c.dataset.targetPlat);
+  return {
+    source: it.source,
+    job_id: it.job_id,
+    index: it.index,
+    name: it.name,
+    title: get("title")?.value || it.title || "KreekCraft GTA 6 Highlight",
+    description: get("description")?.value || "",
+    hashtags: tagsRaw.length ? tagsRaw : ["GTA6", "KreekCraft", "GrandTheftAutoVI"],
+    privacy: get("privacy")?.value || "public",
+    account_id: get("account_id")?.value || null,
+    add_source_link: !!get("add_source_link")?.checked,
+    made_for_kids: !!get("made_for_kids")?.checked,
+    notify_subscribers: !!get("notify_subscribers")?.checked,
+    target_platforms: target_platforms.length ? target_platforms : ["youtube"],
+    tiktok_options: {
+      caption: get("tt_caption")?.value || "",
+      privacy_level: get("tt_privacy_level")?.value || "PUBLIC_TO_EVERYONE",
+      post_mode: get("tt_post_mode")?.value || "DIRECT_POST",
+      account_id: get("tt_account_id")?.value || null,
+      cover_timestamp_ms: Number(get("tt_cover_ms")?.value || 1000),
+      allow_comment: !!get("tt_allow_comment")?.checked,
+      allow_duet: !!get("tt_allow_duet")?.checked,
+      allow_stitch: !!get("tt_allow_stitch")?.checked,
+    },
+    instagram_options: {
+      caption: get("ig_caption")?.value || "",
+      account_id: get("ig_account_id")?.value || null,
+      audio_name: get("ig_audio_name")?.value || "KreekCraft GTA 6 Live",
+      thumb_offset_ms: Number(get("ig_thumb_offset_ms")?.value || 1000),
+      share_to_feed: !!get("ig_share_to_feed")?.checked,
+    },
+  };
+}
+
+$("#list").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-act]");
+  if (!btn) return;
+  const li = btn.closest("[data-key]");
+  const it = (snapshot.items || []).find((x) => x.key === li.dataset.key);
+  if (!it) return;
+  const msgEl = li.querySelector("[data-msg]");
+  const act = btn.dataset.act;
+  msgEl.className = "msg";
+  msgEl.textContent = "";
+
+  if (act === "switch-plat") {
+    cardActivePlatform[it.key] = btn.dataset.plat;
+    lastStructSig = "";
+    renderList();
+    return;
+  }
+
+  if (act === "approve") {
+    const val = btn.dataset.val;
+    try {
+      await api("/api/posts/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: it.key, approval_status: val }),
+      });
+      lastStructSig = "";
+      await refresh();
+    } catch (err) {
+      msgEl.className = "msg err";
+      msgEl.textContent = err.message;
+    }
+    return;
+  }
+
+  if (act === "save") {
+    btn.disabled = true;
+    try {
+      await api("/api/posts/clip", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(readCardFields(li, it)),
+      });
+      lastStructSig = "";
+      await refresh();
+      msgEl.textContent = "Saved!";
+    } catch (err) {
+      msgEl.className = "msg err";
+      msgEl.textContent = err.message;
+    } finally {
+      btn.disabled = false;
+    }
+    return;
+  }
+
+  if (act === "ai") {
+    btn.disabled = true;
+    btn.textContent = "Generating...";
+    try {
+      await api(`/api/watcher/clips/${encodeURIComponent(it.name)}/ai-caption`, { method: "POST" });
+      lastStructSig = "";
+      await refresh();
+    } catch (err) {
+      msgEl.className = "msg err";
+      msgEl.textContent = err.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "✨ AI Rewrite";
+    }
+    return;
+  }
+
+  if (act === "post-active" || act === "post-selected") {
+    const fields = readCardFields(li, it);
+    const platforms = act === "post-active" ? [btn.dataset.plat] : fields.target_platforms;
+    btn.disabled = true;
+    try {
+      await api("/api/posts/clip", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fields),
+      });
+      await api("/api/posts/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: it.key, platforms }),
+      });
+      lastStructSig = "";
+      await refresh();
+    } catch (err) {
+      msgEl.className = "msg err";
+      msgEl.textContent = err.message;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+});
+
+async function refresh(forceStats = false) {
+  try {
+    const [postsData, wStatus] = await Promise.all([
+      api(`/api/posts${forceStats ? "?refresh_stats=true" : ""}`),
+      api("/api/watcher/status").catch(() => ({ running: false })),
+    ]);
+    snapshot = postsData;
+    $("#watchDot").hidden = !wStatus.running;
+    renderSocialSetup(snapshot.socials || {});
+    renderSummaryAndLoop(snapshot.summary || {}, snapshot.loop || {});
+    renderList();
+  } catch {}
+}
+
+$("#refreshStatsBtn").addEventListener("click", () => { lastStructSig = ""; refresh(true); });
+
+$$("[data-filter]").forEach((b) => {
+  b.addEventListener("click", () => {
+    $$("[data-filter]").forEach((x) => x.classList.remove("active"));
+    b.classList.add("active");
+    currentFilter = b.dataset.filter;
+    lastStructSig = "";
+    renderList();
+  });
+});
+
+refresh();
+setInterval(() => refresh(false), 2000);
+</script>
+</body>
+</html>

@@ -1,0 +1,811 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clipsmith — Live Stream Watcher (YouTube &amp; Twitch)</title>
+<style>
+  :root {
+    --bg: #0d0e12; --panel: #16181f; --panel-2: #1d2029; --line: #2a2e3a;
+    --text: #eef0f5; --muted: #a9b0c0; --accent: #ffd60a; --accent-ink: #1a1500;
+    --good: #4ade80; --mid: #fbbf24; --bad: #ff8a8a; --ring: #7cc4ff;
+    --f-body: "Segoe UI", system-ui, -apple-system, sans-serif;
+    --f-mono: ui-monospace, Consolas, monospace;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  @view-transition { navigation: auto; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 var(--f-body); }
+  :focus-visible { outline: 3px solid var(--ring); outline-offset: 2px; }
+  a { color: #8cc8ff; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px 80px; animation: fadeIn .18s ease-out; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } }
+
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 22px 0; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 19px; letter-spacing: -.01em; }
+  .brand i { width: 26px; height: 26px; border-radius: 7px; background: var(--accent); display: grid; place-items: center; }
+  .brand i::after { content: ""; border-left: 9px solid var(--accent-ink); border-top: 6px solid transparent; border-bottom: 6px solid transparent; margin-left: 2px; }
+  .nav { display: inline-flex; gap: 4px; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; }
+  .nav a { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; padding: 0 14px; border-radius: 999px;
+    font-size: 13.5px; font-weight: 600; color: var(--muted); text-decoration: none; transition: background .15s, color .15s; }
+  .nav a:hover { color: var(--text); }
+  .nav a[aria-current="page"] { background: var(--accent); color: var(--accent-ink); }
+  .hdr-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .mode, .ytbadge { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); border: 1px solid var(--line);
+    border-radius: 999px; padding: 5px 12px; min-height: 36px; text-decoration: none; background: transparent; }
+  .mode b, .ytbadge b { color: var(--text); font-weight: 600; }
+  a.ytbadge:hover, button.ytbadge:hover, select.ytbadge:hover { color: var(--text); border-color: var(--muted); }
+  .ytbadge.on { border-color: #5b2a2a; color: var(--text); }
+  .ytdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #ff3b30; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .mode.on .dot { background: var(--good); }
+  .mode.live .dot { background: #ff4d4d; }
+
+  .hero { text-align: center; padding: 20px 0 14px; }
+  h1 { font-size: clamp(26px, 4.4vw, 40px); line-height: 1.12; margin: 0 0 10px; letter-spacing: -.03em; }
+  h1 em { font-style: normal; color: var(--accent); }
+  .hero p { color: var(--muted); margin: 0 auto; max-width: 640px; font-size: 15px; }
+
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 20px; margin-top: 16px; }
+  label.lbl { display: block; font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  input[type=text], input[type=datetime-local], select, textarea {
+    width: 100%; min-height: 46px; background: var(--bg); color: var(--text);
+    border: 1px solid #3a3f4d; border-radius: 10px; padding: 10px 13px; font-size: 15.5px;
+  }
+  select.ytbadge { width: auto; min-height: 36px; padding: 4px 12px; font-size: 12.5px; border-radius: 999px; background: var(--panel); cursor: pointer; }
+  input:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; border-color: var(--ring); box-shadow: 0 0 0 3px rgba(124,196,255,.35); }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .row input[type=text] { flex: 1 1 280px; min-height: 50px; }
+  button { cursor: pointer; border: 0; border-radius: 10px; font-weight: 600; }
+  .go { background: var(--accent); color: var(--accent-ink); padding: 0 22px; min-height: 50px; font-weight: 700; white-space: nowrap; }
+  .go:hover:not(:disabled) { filter: brightness(1.07); }
+  .go:disabled { opacity: .55; cursor: not-allowed; }
+  .ghost { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 42px; padding: 0 14px;
+    background: transparent; color: var(--text); border: 1px solid #3a3f4d; text-decoration: none; font-size: 13.5px; border-radius: 10px; }
+  .ghost:hover:not(:disabled) { background: var(--panel-2); border-color: #5a6072; }
+  .ghost:disabled { opacity: .45; cursor: not-allowed; }
+  .ghost.danger:hover:not(:disabled) { color: var(--bad); border-color: var(--bad); }
+  .post { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 0 15px;
+    background: transparent; color: var(--text); border: 1px solid #3a3f4d; border-radius: 10px; font-size: 13.5px; font-weight: 600; }
+  .post:hover:not(:disabled) { border-color: #ff3b30; background: var(--panel-2); }
+  .post:disabled { opacity: .5; cursor: not-allowed; }
+
+  .presets { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; color: var(--muted); }
+  .preset { min-height: 30px; padding: 0 11px; border-radius: 999px; font-size: 12.5px; font-weight: 600; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); }
+  .preset:hover { border-color: var(--accent); }
+
+  /* ---------- KreekCraft Campaign & Logo Overlay Bar ---------- */
+  .overlay-bar { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-top: 14px; }
+  .overlay-bar.ok { border-color: rgba(74,222,128,.4); background: #0f1b14; }
+  .overlay-bar.warn { border-color: rgba(251,191,36,.45); background: #1c180f; }
+  .ov-info { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .ov-thumb { width: 40px; height: 40px; object-fit: contain; border-radius: 6px; background: #000; border: 1px solid var(--line); }
+  .ov-info b { display: block; font-size: 14.5px; }
+  .ov-info small { display: block; color: var(--muted); font-size: 12.5px; }
+  .ov-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .file-btn { position: relative; overflow: hidden; }
+  .file-btn input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+
+  .opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-top: 16px; }
+  .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .err { color: var(--bad); font-size: 14.5px; margin: 12px 0 0; }
+  .err:empty { display: none; }
+  .banner { border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: 12px 14px; font-size: 14.5px; margin-top: 14px; }
+  .banner.err { border-color: #7a3434; background: #241517; color: #ffc4c4; }
+
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-top: 18px; }
+  .metric { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+  .metric dt { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .metric dd { margin: 6px 0 2px; font: 700 20px/1.2 var(--f-mono); }
+  .metric small { display: block; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  .good { color: var(--good); }
+  .mid { color: var(--mid); }
+  .spin { display: inline-block; width: 14px; height: 14px; border-radius: 50%; border: 2px solid #3a3f4d; border-top-color: var(--accent); animation: spin .9s linear infinite; vertical-align: -2px; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .section-head { display: flex; align-items: baseline; justify-content: space-between; margin: 36px 0 14px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+  .section-head h2 { margin: 0; font-size: 20px; }
+  .section-head span { color: var(--muted); font: 500 13.5px var(--f-mono); }
+  .clips { display: grid; gap: 14px; list-style: none; padding: 0; margin: 0; }
+  .clip { display: flex; gap: 18px; align-items: flex-start; padding: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; }
+  .clip video { width: 156px; aspect-ratio: 9/16; background: #000; border-radius: 10px; flex: none; object-fit: contain; }
+  .clip-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+  .clip-info h3 { margin: 0; font-size: 18px; line-height: 1.3; overflow-wrap: anywhere; }
+  .caption-preview { margin: 0; color: var(--muted); font-size: 14px; white-space: pre-line; }
+  .tags { color: #8cd6ff; font-size: 13.5px; overflow-wrap: anywhere; }
+  .pills { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pill { font: 500 12px/1 var(--f-mono); background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 5px 9px; color: var(--muted); }
+  .pill.ok { color: var(--good); border-color: rgba(74,222,128,.35); background: #101e15; }
+  .pill.warn { color: var(--mid); border-color: rgba(251,191,36,.4); background: #1f1a0e; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 4px; }
+  .dl { display: inline-flex; align-items: center; justify-content: center; min-height: 42px; padding: 0 15px; border-radius: 10px;
+    background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 13.5px; text-decoration: none; }
+  .dl:hover { filter: brightness(1.07); }
+  .yt-box { border-radius: 10px; padding: 10px 12px; font-size: 13.5px; border: 1px solid var(--line); background: var(--bg); margin-top: 4px; }
+  .yt-box.ok { border-color: rgba(74,222,128,.4); background: #0f1d15; }
+  .yt-box.err { border-color: #7a3434; background: #241517; color: #ffc4c4; }
+  .empty { text-align: center; color: var(--muted); padding: 34px 20px; border: 1.5px dashed var(--line); border-radius: 16px; }
+
+  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 16px; padding: 0; width: min(560px, calc(100vw - 32px)); }
+  dialog::backdrop { background: rgba(0,0,0,.6); }
+  .dlg { padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+  .dlg-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .dlg h2 { margin: 0; font-size: 19px; }
+  .dlg textarea { min-height: 92px; resize: vertical; }
+  .dlg .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .dlg fieldset { border: 0; margin: 0; padding: 0; }
+  .dlg legend { padding: 0; font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+  .dlg .opt { display: flex; align-items: center; gap: 10px; min-height: 38px; font-size: 14.5px; cursor: pointer; }
+  .dlg .opt input { accent-color: var(--accent); width: 18px; height: 18px; margin: 0; }
+  .dlg .count { float: right; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .dlg .btns { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
+  .dlg .btns button { min-height: 44px; padding: 0 20px; }
+  .hint { font-size: 13px; color: var(--muted); margin: 4px 0 0; }
+
+  @media (max-width: 600px) {
+    .clip { flex-direction: column; }
+    .clip video { width: 100%; max-width: 300px; align-self: center; }
+    .dlg .two { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><i aria-hidden="true"></i>Clipsmith</div>
+    <nav class="nav" aria-label="Mode">
+      <a href="/">Video to Shorts</a>
+      <a href="/watcher" aria-current="page">Live Stream</a>
+      <a href="/posts">Posts &amp; Stats</a>
+    </nav>
+    <div class="hdr-right">
+      <span id="yt" class="hdr-right"></span>
+      <div class="mode" id="badge" role="status"><span class="dot" aria-hidden="true"></span><span>Idle</span></div>
+    </div>
+  </header>
+
+  <main>
+    <div class="hero">
+      <h1>KreekCraft GTA 6 <em>Live Stream Clipper</em></h1>
+      <p>Works with <b>YouTube Live</b> and <b>Twitch Live</b>. Automatically applies the mandatory KreekCraft logo overlay, burns in subtitles, and formats captions with <code>Watch KreekCraft on YouTube and Twitch</code> + <code>#GTA6 #KreekCraft #GrandTheftAutoVI</code> (no links).</p>
+    </div>
+
+    <div id="ytmsg" role="status"></div>
+
+    <form class="card" id="form" novalidate>
+      <label class="lbl" for="url">YouTube Live or Twitch stream link</label>
+      <div class="row">
+        <input type="text" id="url" value="https://www.youtube.com/live/dy-oCN2NxfA" placeholder="https://www.youtube.com/live/dy-oCN2NxfA or https://www.twitch.tv/kreekcraft" autocomplete="off" required>
+        <button class="go" id="startBtn" type="submit">Watch stream</button>
+      </div>
+      <div class="presets">
+        <span>Official KreekCraft Sources:</span>
+        <button type="button" class="preset" data-preset="https://www.youtube.com/live/dy-oCN2NxfA">🔴 YouTube Livestream</button>
+        <button type="button" class="preset" data-preset="https://www.youtube.com/@Kreek/streams">🔴 @Kreek Streams</button>
+        <button type="button" class="preset" data-preset="https://www.twitch.tv/kreekcraft">🟣 Twitch Livestream</button>
+      </div>
+
+      <div class="overlay-bar warn" id="overlayBar">
+        <div class="ov-info">
+          <img class="ov-thumb" id="ovThumb" hidden alt="Logo overlay preview">
+          <div>
+            <b id="ovTitle">⚠️ Official KreekCraft Logo Overlay Not Uploaded Yet</b>
+            <small id="ovSub">Mandatory: Upload the official KreekCraft logo overlay so it appears start-to-finish on every clip.</small>
+          </div>
+        </div>
+        <div class="ov-actions">
+          <label class="ghost file-btn">
+            <span id="ovUploadLabel">Upload Logo Overlay</span>
+            <input type="file" id="ovInput" accept=".png,.webp,.gif,.mov,.mp4,image/*,video/*">
+          </label>
+          <button type="button" class="ghost danger" id="ovRemoveBtn" hidden>Remove</button>
+        </div>
+      </div>
+
+      <div class="opts">
+        <div>
+          <label class="lbl" for="framing">Framing</label>
+          <select id="framing">
+            <option value="9:16-blur" selected>9:16 Blurred BG</option>
+            <option value="9:16-crop">9:16 Center Crop</option>
+            <option value="16:9">16:9 Original</option>
+          </select>
+        </div>
+        <div>
+          <label class="lbl" for="mult">Spike multiplier</label>
+          <select id="mult">
+            <option value="2.0">2.0x baseline</option>
+            <option value="2.5" selected>2.5x baseline</option>
+            <option value="3.5">3.5x baseline</option>
+          </select>
+        </div>
+        <div>
+          <label class="lbl" for="minMsgs">Min chat rate</label>
+          <select id="minMsgs">
+            <option value="5">5 msgs / 10s</option>
+            <option value="10" selected>10 msgs / 10s</option>
+            <option value="20">20 msgs / 10s</option>
+          </select>
+        </div>
+        <div>
+          <label class="lbl" for="bfHours">Parallel Catch-Up (Missed Stream Time)</label>
+          <select id="bfHours">
+            <option value="1" selected>Auto (detect missed stream time)</option>
+            <option value="0">Off (live spikes only)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <button class="ghost danger" id="stopBtn" type="button" disabled>Stop watching</button>
+        <button class="ghost" id="triggerBtn" type="button">Test clip now</button>
+        <button class="ghost" id="backfillBtn" type="button">⏪ Catch Up Missed Stream Time</button>
+        <label style="display:inline-flex;align-items:center;gap:8px;margin-left:auto;font-size:14px;font-weight:600;cursor:pointer">
+          <input type="checkbox" id="autopost" style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer">
+          Auto-post new clips to YouTube
+        </label>
+        <select id="autoPrivacy" aria-label="Auto-post visibility" style="width:auto;min-height:38px;padding:6px 12px;font-size:13.5px">
+          <option value="public" selected>Public</option>
+          <option value="unlisted">Unlisted</option>
+          <option value="private">Private</option>
+        </select>
+      </div>
+      <p class="err" id="err" role="alert"></p>
+    </form>
+
+    <dl class="metrics" aria-label="Live telemetry">
+      <div class="metric">
+        <dt>Stream</dt>
+        <dd id="mStream">Idle</dd>
+        <small id="mStreamSub">YouTube Live &amp; Twitch supported</small>
+      </div>
+      <div class="metric">
+        <dt>Chat Rate (10s)</dt>
+        <dd id="mChat">0</dd>
+        <small id="mChatSub">Baseline: 0.0 · Trigger &gt;= 10</small>
+      </div>
+      <div class="metric">
+        <dt>Hype Spikes</dt>
+        <dd id="mSpikes">0</dd>
+        <small id="mSpikesSub">No spikes yet</small>
+      </div>
+      <div class="metric">
+        <dt>Activity</dt>
+        <dd id="mStatus">Idle</dd>
+        <small id="mStatusSub">Ready</small>
+      </div>
+      <div class="metric">
+        <dt>Parallel Catch-Up Agent</dt>
+        <dd id="mBackfill">Idle</dd>
+        <small id="mBackfillSub">Unseen past 4h processor</small>
+      </div>
+    </dl>
+
+    <div class="section-head">
+      <h2>Exported clips (KreekCraft Campaign Format)</h2>
+      <span id="clipCount">0 clips</span>
+    </div>
+    <ul class="clips" id="clips"></ul>
+  </main>
+</div>
+
+<dialog id="ytdlg" aria-labelledby="ytdlgTitle">
+  <form class="dlg" id="ytform" method="dialog">
+    <div class="dlg-top">
+      <h2 id="ytdlgTitle">Post to YouTube Shorts</h2>
+      <button type="button" class="ghost" id="aiCaptionBtn" style="min-height:36px;padding:0 12px;font-size:13px">✨ AI Rewrite Caption</button>
+    </div>
+    <div id="ytAccountRow" hidden>
+      <label class="lbl" for="ytAccount">YouTube channel</label>
+      <select id="ytAccount"></select>
+    </div>
+    <div>
+      <label class="lbl" for="ytTitle">Shorts Title <span class="count" id="ytCount">0/100</span></label>
+      <input type="text" id="ytTitle" maxlength="100" required>
+    </div>
+    <div>
+      <label class="lbl" for="ytDesc">Caption (No links/URLs allowed per campaign rules)</label>
+      <textarea id="ytDesc" maxlength="4500"></textarea>
+    </div>
+    <div>
+      <label class="lbl" for="ytTags">Required Hashtags</label>
+      <input type="text" id="ytTags" placeholder="#GTA6 #KreekCraft #GrandTheftAutoVI">
+      <p class="hint">Campaign requires: #GTA6 #KreekCraft #GrandTheftAutoVI and "Watch KreekCraft on YouTube and Twitch" (no URLs).</p>
+    </div>
+    <div class="two">
+      <div>
+        <label class="lbl" for="ytPrivacy">Visibility (Public required for 30 days)</label>
+        <select id="ytPrivacy">
+          <option value="public">Public</option>
+          <option value="unlisted">Unlisted</option>
+          <option value="private">Private</option>
+        </select>
+      </div>
+      <div>
+        <label class="lbl" for="ytWhen">When</label>
+        <select id="ytWhen">
+          <option value="now">Post now</option>
+          <option value="later">Schedule</option>
+        </select>
+      </div>
+    </div>
+    <div id="ytLaterBox" hidden>
+      <label class="lbl" for="ytAt">Publish at (your local time)</label>
+      <input type="datetime-local" id="ytAt">
+      <p class="hint">Uploaded privately now; YouTube makes it public automatically at this time.</p>
+    </div>
+    <fieldset>
+      <legend>Audience (required by YouTube)</legend>
+      <label class="opt"><input type="radio" name="ytKids" value="no" checked required> No, it's not made for kids</label>
+      <label class="opt"><input type="radio" name="ytKids" value="yes"> Yes, it's made for kids</label>
+    </fieldset>
+    <label class="opt"><input type="checkbox" id="ytNotify" checked> Notify subscribers (Keep likes visible in YouTube Studio)</label>
+    <p class="err" id="yterr" role="alert"></p>
+    <div class="btns">
+      <button type="button" class="ghost" id="ytCancel">Cancel</button>
+      <button type="submit" class="go" id="ytSubmit">Post to YouTube</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const SETUP_DOC = "https://github.com/AbdulSamad94/clipsmith/blob/main/docs/youtube-setup.md";
+
+let yt = { configured: false, connected: false, channel: null, accounts: [], active_id: null };
+let latestClips = [];
+let postingClipName = null;
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
+  return data;
+}
+
+document.querySelectorAll("[data-preset]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    $("#url").value = btn.dataset.preset;
+    $("#url").focus();
+  });
+});
+
+function renderOverlay(ov) {
+  const bar = $("#overlayBar");
+  const thumb = $("#ovThumb");
+  const removeBtn = $("#ovRemoveBtn");
+  if (ov && ov.present) {
+    bar.className = "overlay-bar ok";
+    $("#ovTitle").textContent = `✅ Official KreekCraft Logo Overlay Active (${ov.filename})`;
+    $("#ovSub").textContent = "Composited clearly from start to finish on every newly exported clip.";
+    $("#ovUploadLabel").textContent = "Replace Overlay";
+    removeBtn.hidden = false;
+    if (/\.(png|webp|gif)$/i.test(ov.filename)) {
+      thumb.src = `${ov.url}?t=${Date.now()}`;
+      thumb.hidden = false;
+    } else {
+      thumb.hidden = true;
+    }
+  } else {
+    bar.className = "overlay-bar warn";
+    $("#ovTitle").textContent = "⚠️ Official KreekCraft Logo Overlay Not Uploaded Yet";
+    $("#ovSub").textContent = "Mandatory: Upload the official KreekCraft logo overlay (.png / .webp / .mov / .mp4) so it appears throughout every clip.";
+    $("#ovUploadLabel").textContent = "Upload Logo Overlay";
+    removeBtn.hidden = true;
+    thumb.hidden = true;
+  }
+}
+
+$("#ovInput").addEventListener("change", async () => {
+  const file = $("#ovInput").files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append("file", file);
+  $("#err").textContent = "";
+  try {
+    const ov = await api("/api/watcher/overlay", { method: "POST", body: fd });
+    renderOverlay(ov);
+    lastClipSig = "";
+    await poll();
+  } catch (err) {
+    $("#err").textContent = err.message;
+  } finally {
+    $("#ovInput").value = "";
+  }
+});
+
+$("#ovRemoveBtn").addEventListener("click", async () => {
+  if (!confirm("Remove the KreekCraft logo overlay?")) return;
+  try {
+    const ov = await api("/api/watcher/overlay", { method: "DELETE" });
+    renderOverlay(ov);
+    lastClipSig = "";
+    await poll();
+  } catch (err) { $("#err").textContent = err.message; }
+});
+
+async function loadYouTube() {
+  try {
+    const [st, acc] = await Promise.all([api("/api/youtube"), api("/api/youtube/accounts").catch(() => ({ accounts: [], active_id: null }))]);
+    yt = { ...st, accounts: acc.accounts || [], active_id: acc.active_id || null };
+  } catch { return; }
+  const el = $("#yt");
+  if (!yt.configured) {
+    el.innerHTML = `<a class="ytbadge" href="${SETUP_DOC}" target="_blank" rel="noopener"><span class="ytdot"></span>Set up YouTube posting</a>`;
+  } else if (!yt.connected) {
+    el.innerHTML = `<a class="ytbadge" href="/api/youtube/connect?next=/watcher"><span class="ytdot"></span>Connect YouTube</a>`;
+  } else {
+    const accs = yt.accounts.length ? yt.accounts : [{ id: (yt.channel && yt.channel.id) || "default", title: (yt.channel && yt.channel.title) || "connected", active: true }];
+    const switcher = accs.length > 1
+      ? `<select class="ytbadge on" id="ytSelect" aria-label="Active YouTube channel">${accs.map((a) => `<option value="${esc(a.id)}" ${a.active ? "selected" : ""}>YouTube: ${esc(a.title)}</option>`).join("")}</select>`
+      : `<span class="ytbadge on"><span class="ytdot"></span>YouTube: <b>${esc(accs[0].title)}</b></span>`;
+    el.innerHTML = `${switcher}
+      <a class="ytbadge" href="/api/youtube/connect?next=/watcher" title="Link another YouTube channel">+ Add channel</a>
+      <button class="ytbadge" id="ytOff" type="button">Disconnect</button>`;
+    const sel = $("#ytSelect");
+    if (sel) {
+      sel.onchange = async () => {
+        await api("/api/youtube/select", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account_id: sel.value }) }).catch((e) => alert(e.message));
+        await loadYouTube();
+      };
+    }
+    $("#ytOff").onclick = async () => {
+      const cur = accs.find((a) => a.active) || accs[0];
+      if (!confirm(`Disconnect YouTube channel "${cur.title}"?`)) return;
+      const q = cur && cur.id ? `?account_id=${encodeURIComponent(cur.id)}` : "";
+      await api(`/api/youtube/disconnect${q}`, { method: "POST" }).catch((e) => alert(e.message));
+      await loadYouTube();
+    };
+  }
+}
+
+function showConnectResult() {
+  const p = new URLSearchParams(location.search);
+  const r = p.get("youtube");
+  if (!r) return;
+  const why = p.get("reason");
+  $("#ytmsg").innerHTML = r === "connected"
+    ? `<div class="banner">YouTube channel connected. Click <b>Post to YouTube</b> on any clip below.</div>`
+    : `<div class="banner err">YouTube wasn't connected${why === "access_denied" ? " (permission was declined)" : why === "expired" ? " (sign-in link expired)" : ""}.</div>`;
+  history.replaceState(null, "", location.pathname);
+}
+
+function fmtTime(sec) {
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function framingValues() {
+  const v = $("#framing").value;
+  if (v === "16:9") return { vertical_mode: false, vertical_layout: "blur" };
+  if (v === "9:16-crop") return { vertical_mode: true, vertical_layout: "crop" };
+  return { vertical_mode: true, vertical_layout: "blur" };
+}
+
+function ytBoxHtml(y) {
+  if (!y) return "";
+  if (y.status === "queued" || y.status === "uploading") {
+    const pct = y.status === "uploading" ? (y.progress || 0) : 0;
+    return `<div class="yt-box"><span class="spin"></span>Uploading to YouTube Shorts · <b>${pct}%</b></div>`;
+  }
+  if (y.status === "error") {
+    return `<div class="yt-box err"><b>Upload failed:</b> ${esc(y.error)}</div>`;
+  }
+  if (y.status === "done") {
+    const label = y.scheduled_for ? `Scheduled (${esc(new Date(y.scheduled_for).toLocaleString())})` : "Posted to YouTube Shorts";
+    return `<div class="yt-box ok"><b>${label}</b> · <a href="${esc(y.url)}" target="_blank" rel="noopener">Open on YouTube ↗</a></div>`;
+  }
+  return "";
+}
+
+let lastClipSig = "";
+function renderClips(clips) {
+  latestClips = clips;
+  $("#clipCount").textContent = `${clips.length} clip${clips.length === 1 ? "" : "s"}`;
+  const sig = clips.map((c) => `${c.name}:${c.size_mb}:${c.title}:${JSON.stringify(c.compliance || null)}:${JSON.stringify(c.youtube || null)}`).join("|");
+  if (sig === lastClipSig) return;
+  lastClipSig = sig;
+  const list = $("#clips");
+  if (!clips.length) {
+    list.innerHTML = `<li class="empty">No clips exported yet. Watch KreekCraft's YouTube/Twitch live stream or click <b>Test clip now</b>.</li>`;
+    return;
+  }
+  list.innerHTML = clips.map((c) => {
+    const tags = (c.hashtags || []).map((h) => "#" + String(h).replace(/^#+/, "")).join(" ");
+    const y = c.youtube;
+    const cmp = c.compliance || {};
+    const busy = y && (y.status === "queued" || y.status === "uploading");
+    const postLabel = y && y.status === "done" ? "Post again" : y && y.status === "error" ? "Retry YouTube" : "Post to YouTube";
+    return `
+    <li class="clip">
+      <video src="${esc(c.video)}" controls preload="metadata" playsinline></video>
+      <div class="clip-info">
+        <div class="pills">
+          <span class="pill">${esc(c.name)}</span>
+          <span class="pill">${c.size_mb} MB</span>
+          <span class="pill ${cmp.overlay_ok ? "ok" : "warn"}">${cmp.overlay_ok ? "✓ Logo Overlay" : "⚠ Upload Logo Overlay"}</span>
+          <span class="pill ${cmp.cta_ok ? "ok" : "warn"}">${cmp.cta_ok ? "✓ KreekCraft CTA" : "⚠ Missing CTA"}</span>
+          <span class="pill ${cmp.tags_ok ? "ok" : "warn"}">${cmp.tags_ok ? "✓ #GTA6 #KreekCraft" : "⚠ Check Hashtags"}</span>
+          <span class="pill ${cmp.no_links_ok ? "ok" : "warn"}">${cmp.no_links_ok ? "✓ No Links" : "⚠ Remove URLs"}</span>
+        </div>
+        <h3>${esc(c.title || c.name)}</h3>
+        ${c.description ? `<p class="caption-preview">${esc(c.description)}</p>` : ""}
+        ${tags ? `<div class="tags">${esc(tags)}</div>` : ""}
+        <div class="actions">
+          <a class="dl" href="${esc(c.video)}" download="${esc(c.name)}">Download MP4</a>
+          <button class="post" type="button" data-post="${esc(c.name)}" ${busy ? "disabled" : ""}>
+            <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="4" fill="#ff3b30"/><path d="M10 9v6l5-3z" fill="#fff"/></svg>${postLabel}
+          </button>
+          <button class="ghost" type="button" data-copy="${esc(c.name)}">Copy TikTok/Reels Caption</button>
+          ${c.srt ? `<a class="ghost" href="${esc(c.srt)}" download="${esc(c.name.replace(/\.mp4$/, ".srt"))}">Download SRT</a>` : ""}
+          <button class="ghost danger" type="button" data-del="${esc(c.name)}" ${busy ? "disabled" : ""}>Delete</button>
+        </div>
+        ${ytBoxHtml(y)}
+      </div>
+    </li>`;
+  }).join("");
+}
+
+let lastOverlaySig = "";
+function renderState(st) {
+  const ovSig = JSON.stringify(st.overlay || null);
+  if (ovSig !== lastOverlaySig) {
+    lastOverlaySig = ovSig;
+    renderOverlay(st.overlay);
+  }
+  const badge = $("#badge");
+  const plat = st.platform === "youtube" ? "YouTube Live" : "Twitch";
+  badge.className = "mode" + (st.is_live ? " live" : st.running ? " on" : "");
+  badge.querySelector("span:last-child").innerHTML = st.is_live
+    ? `<b>LIVE</b> · #${esc(st.channel)} (${plat})`
+    : st.running ? `Watching <b>#${esc(st.channel)}</b> (${plat})` : "Idle";
+
+  $("#startBtn").textContent = st.running ? "Switch stream" : "Watch stream";
+  $("#stopBtn").disabled = !st.running;
+  $("#triggerBtn").disabled = st.busy;
+  if (document.activeElement !== $("#autopost")) $("#autopost").checked = !!st.auto_post;
+  if (st.auto_privacy && document.activeElement !== $("#autoPrivacy")) $("#autoPrivacy").value = st.auto_privacy;
+  if (st.stream_url && document.activeElement !== $("#url") && !$("#url").value) {
+    $("#url").value = st.stream_url;
+  }
+
+  $("#mStream").textContent = st.is_live ? `LIVE (${plat})` : st.running ? `OFFLINE (${plat})` : "Idle";
+  $("#mStream").className = st.is_live ? "good" : st.running ? "mid" : "";
+  $("#mStreamSub").textContent = st.running
+    ? `#${st.channel} · Uptime ${fmtTime(st.uptime_seconds)} · ${st.segments} segs`
+    : "Paste a YouTube Live or Twitch link";
+
+  $("#mChat").textContent = `${st.current_count} / ${st.last_window_count}`;
+  $("#mChatSub").textContent = `Chat: ${st.irc_connected ? "connected" : "off"} · Base ${st.baseline} · Trigger >= ${st.threshold}`;
+
+  $("#mSpikes").textContent = String(st.spikes_count);
+  $("#mSpikesSub").textContent = st.last_spike
+    ? `Last: ${st.last_spike.count} msgs (${st.last_spike.multiplier}x)`
+    : "No spikes yet";
+
+  $("#mStatus").innerHTML = st.busy ? `<span class="spin" aria-hidden="true"></span>Working` : (st.running ? "Watching" : "Idle");
+  $("#mStatusSub").textContent = st.status_note || "Ready";
+
+  const bf = st.backfill || {};
+  $("#backfillBtn").disabled = !!bf.running;
+  $("#mBackfill").innerHTML = bf.running ? `<span class="spin" aria-hidden="true"></span>Running` : (bf.clips_count ? `${bf.clips_count} clips` : "Idle");
+  $("#mBackfillSub").textContent = bf.status || "Processes unseen past footage in 15m chunks";
+
+  renderClips(st.clips || []);
+}
+
+async function poll() {
+  try { renderState(await api("/api/watcher/status")); } catch {}
+}
+
+function updateCount() { $("#ytCount").textContent = `${$("#ytTitle").value.length}/100`; }
+$("#ytTitle").addEventListener("input", updateCount);
+$("#ytWhen").addEventListener("change", () => {
+  const later = $("#ytWhen").value === "later";
+  $("#ytLaterBox").hidden = !later;
+  if (later) $("#ytPrivacy").value = "public";
+  $("#ytPrivacy").disabled = later;
+});
+$("#ytCancel").addEventListener("click", () => $("#ytdlg").close());
+
+function openPostDialog(name) {
+  const c = latestClips.find((x) => x.name === name);
+  if (!c) return;
+  if (!yt.connected) {
+    $("#ytmsg").innerHTML = yt.configured
+      ? `<div class="banner">Click <b>Connect YouTube</b> at the top first to link your YouTube channel.</div>`
+      : `<div class="banner">YouTube posting isn't configured yet. Add <code>YOUTUBE_CLIENT_ID</code> and <code>YOUTUBE_CLIENT_SECRET</code> to <code>.env</code> (<a href="${SETUP_DOC}" target="_blank" rel="noopener">5-minute setup guide</a>).</div>`;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  postingClipName = name;
+  const accs = (yt.accounts && yt.accounts.length) ? yt.accounts : (yt.channel ? [{ id: yt.channel.id || "default", title: yt.channel.title, active: true }] : []);
+  $("#ytAccountRow").hidden = accs.length <= 1;
+  $("#ytAccount").innerHTML = accs.map((a) => `<option value="${esc(a.id)}" ${a.active ? "selected" : ""}>${esc(a.title)}</option>`).join("");
+  $("#ytTitle").value = (c.title || c.name).replace(/[<>]/g, "").slice(0, 100);
+  $("#ytDesc").value = c.description || "Watch KreekCraft on YouTube and Twitch! 🔴";
+  $("#ytTags").value = (c.hashtags || ["GTA6", "KreekCraft", "GrandTheftAutoVI"]).map((h) => "#" + String(h).replace(/^#+/, "")).join(" ");
+  $("#ytPrivacy").value = "public";
+  $("#ytPrivacy").disabled = false;
+  $("#ytWhen").value = "now";
+  $("#ytLaterBox").hidden = true;
+  const soon = new Date(Date.now() + 60 * 60 * 1000);
+  soon.setMinutes(0, 0, 0);
+  $("#ytAt").value = new Date(soon.getTime() - soon.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  $("#yterr").textContent = "";
+  updateCount();
+  $("#ytdlg").showModal();
+}
+
+$("#aiCaptionBtn").addEventListener("click", async () => {
+  if (!postingClipName) return;
+  const btn = $("#aiCaptionBtn");
+  btn.disabled = true;
+  btn.textContent = "Generating...";
+  $("#yterr").textContent = "";
+  try {
+    const res = await api(`/api/watcher/clips/${encodeURIComponent(postingClipName)}/ai-caption`, { method: "POST" });
+    $("#ytTitle").value = (res.title || "").slice(0, 100);
+    $("#ytDesc").value = res.description || "";
+    $("#ytTags").value = (res.hashtags || ["GTA6", "KreekCraft", "GrandTheftAutoVI"]).map((h) => "#" + String(h).replace(/^#+/, "")).join(" ");
+    updateCount();
+    await poll();
+  } catch (err) {
+    $("#yterr").textContent = err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "✨ AI Rewrite Caption";
+  }
+});
+
+$("#ytform").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!postingClipName) return;
+  const kids = document.querySelector('input[name="ytKids"]:checked');
+  let publish_at = null;
+  if ($("#ytWhen").value === "later") {
+    const at = new Date($("#ytAt").value);
+    if (isNaN(at) || at <= new Date()) { $("#yterr").textContent = "Pick a publish time in the future."; return; }
+    publish_at = at.toISOString();
+  }
+  const body = {
+    title: $("#ytTitle").value,
+    description: $("#ytDesc").value,
+    hashtags: $("#ytTags").value.split(/[\s,]+/).map((t) => t.replace(/^#+/, "")).filter(Boolean),
+    privacy: $("#ytPrivacy").value,
+    publish_at,
+    made_for_kids: kids && kids.value === "yes",
+    notify_subscribers: $("#ytNotify").checked,
+    add_source_link: false,
+    account_id: (!$("#ytAccountRow").hidden && $("#ytAccount").value) ? $("#ytAccount").value : undefined,
+  };
+  $("#ytSubmit").disabled = true;
+  try {
+    await api(`/api/watcher/clips/${encodeURIComponent(postingClipName)}/youtube`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    $("#ytdlg").close();
+    await poll();
+  } catch (err) {
+    $("#yterr").textContent = err.message;
+  } finally {
+    $("#ytSubmit").disabled = false;
+  }
+});
+
+$("#form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("#err").textContent = "";
+  const url = $("#url").value.trim();
+  if (!url) { $("#err").textContent = "Paste a YouTube Live or Twitch stream link."; $("#url").focus(); return; }
+  $("#startBtn").disabled = true;
+  try {
+    const bfVal = +$("#bfHours").value;
+    const st = await api("/api/watcher/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url,
+        multiplier: +$("#mult").value,
+        min_messages: +$("#minMsgs").value,
+        auto_post: $("#autopost").checked,
+        auto_privacy: $("#autoPrivacy").value,
+        auto_account_id: yt.active_id || undefined,
+        backfill_enabled: bfVal > 0,
+        backfill_hours: bfVal > 0 ? bfVal : 4.0,
+        ...framingValues(),
+      }),
+    });
+    renderState(st);
+  } catch (err) {
+    $("#err").textContent = err.message;
+  } finally {
+    $("#startBtn").disabled = false;
+  }
+});
+
+async function syncAutoPost() {
+  try {
+    await api("/api/posts/auto", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        enabled: $("#autopost").checked,
+        privacy: $("#autoPrivacy").value,
+        account_id: yt.active_id || null,
+        post_all_ready: false,
+      }),
+    });
+  } catch (err) { $("#err").textContent = err.message; }
+}
+$("#autopost").addEventListener("change", syncAutoPost);
+$("#autoPrivacy").addEventListener("change", syncAutoPost);
+
+$("#stopBtn").addEventListener("click", async () => {
+  $("#err").textContent = "";
+  try { renderState(await api("/api/watcher/stop", { method: "POST" })); }
+  catch (err) { $("#err").textContent = err.message; }
+});
+
+$("#triggerBtn").addEventListener("click", async () => {
+  $("#err").textContent = "";
+  try { renderState(await api("/api/watcher/trigger", { method: "POST" })); }
+  catch (err) { $("#err").textContent = err.message; }
+});
+
+$("#backfillBtn").addEventListener("click", async () => {
+  $("#err").textContent = "";
+  const hrs = +$("#bfHours").value || 4.0;
+  try {
+    renderState(await api("/api/watcher/backfill", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: $("#url").value.trim() || null, hours: hrs }),
+    }));
+  } catch (err) { $("#err").textContent = err.message; }
+});
+
+$("#clips").addEventListener("click", async (e) => {
+  const postBtn = e.target.closest("[data-post]");
+  if (postBtn) {
+    openPostDialog(postBtn.dataset.post);
+    return;
+  }
+  const copyBtn = e.target.closest("[data-copy]");
+  if (copyBtn) {
+    const c = latestClips.find((x) => x.name === copyBtn.dataset.copy);
+    if (!c) return;
+    const tags = (c.hashtags || ["GTA6", "KreekCraft", "GrandTheftAutoVI"]).map((h) => "#" + String(h).replace(/^#+/, "")).join(" ");
+    const text = `${c.description || "Watch KreekCraft on YouTube and Twitch! 🔴"} ${tags}`.trim();
+    try {
+      await navigator.clipboard.writeText(text);
+      copyBtn.textContent = "Copied!";
+      setTimeout(() => (copyBtn.textContent = "Copy TikTok/Reels Caption"), 1800);
+    } catch {}
+    return;
+  }
+  const delBtn = e.target.closest("[data-del]");
+  if (delBtn) {
+    const name = delBtn.dataset.del;
+    if (!confirm(`Delete ${name} and its subtitles?`)) return;
+    try {
+      await api(`/api/watcher/clips/${encodeURIComponent(name)}`, { method: "DELETE" });
+      await poll();
+    } catch (err) { $("#err").textContent = err.message; }
+  }
+});
+
+showConnectResult();
+loadYouTube();
+poll();
+setInterval(poll, 1500);
+</script>
+</body>
+</html>

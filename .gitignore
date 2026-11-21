@@ -1,6 +1,9 @@
 .venv/
 data/
 .env
+clip-watcher/.env
+clip-watcher/temp_recordings/
+clip-watcher/output_clips/
 __pycache__/
 *.pyc
 error/
