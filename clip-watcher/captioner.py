@@ -127,14 +127,47 @@ def extract_srt_transcript(srt_path: Path) -> str:
     return " ".join(lines).strip()
 
 
-def build_default_metadata(
-    srt_path: Path, channel: str | None = None, campaign_mode: bool | None = None
-) -> dict:
-    """Build ready-to-post Shorts/TikTok/Reels metadata following KreekCraft GTA 6 campaign rules."""
-    if campaign_mode is None:
-        campaign_mode = config.CAMPAIGN_MODE
+def _ass_time(seconds: float) -> str:
+    cs = max(0, int(round(seconds * 100)))
+    return f"{cs // 360000}:{cs // 6000 % 60:02d}:{cs // 100 % 60:02d}.{cs % 100:02d}"
 
-    chan = (channel or "").strip().lstrip("#@").lower()
+
+def _esc_ass(text: str) -> str:
+    return (text or "").replace("\\", "").replace("{", "(").replace("}", ")")
+
+
+def derive_cliffhanger_text(transcript: str, custom_template: str | None = None, streamer: str | None = None) -> str:
+    """Create a punchy white-box cliffhanger hook banner from the transcript or custom template."""
+    tmpl = (custom_template or "").strip()
+    sentences = [s.strip() for s in re.split(r"(?<=[.?!])\s+", strip_urls(transcript or "")) if s.strip()]
+    first = sentences[0] if sentences else (transcript or "").strip()[:55]
+    if len(first) > 48:
+        first = first[:45].rstrip(" ,;:") + "..."
+    if tmpl and "{hook}" in tmpl.lower():
+        return re.sub(r"\{hook\}", first or "WAIT FOR IT...", tmpl, flags=re.I)[:75].upper()
+    if tmpl and first:
+        return f"{tmpl} — \"{first.upper()}\""[:78]
+    if tmpl:
+        return tmpl[:75].upper()
+    if first:
+        return f"WAIT FOR IT: \"{first.upper()}\""[:78]
+    tag = (streamer or "THIS STREAM").upper()
+    return f"WAIT UNTIL YOU SEE WHAT HAPPENED ON {tag}..."[:75]
+
+
+def build_default_metadata(
+    srt_path: Path,
+    channel: str | None = None,
+    campaign_mode: bool | None = None,
+    campaign_rules: dict | None = None,
+    cliffhanger_text: str | None = None,
+) -> dict:
+    """Build ready-to-post Shorts/TikTok/Reels metadata following active campaign rules or general mode."""
+    rules = campaign_rules or {}
+    if campaign_mode is None:
+        campaign_mode = bool(rules.get("id", "kreekcraft-gta6") != "general") if rules else config.CAMPAIGN_MODE
+
+    chan = (channel or rules.get("streamer") or "").strip().lstrip("#@").lower()
     if not chan:
         stem = srt_path.stem
         prefix = stem.split("_")[0].lower()
@@ -148,37 +181,57 @@ def build_default_metadata(
     if len(hook_clean) > 65:
         hook_clean = hook_clean[:62].rstrip(" ,;:") + "..."
 
-    if campaign_mode:
-        if hook_clean:
-            title = f"{hook_clean} | KreekCraft GTA 6"
-        else:
-            title = "KreekCraft GTA 6 Stream Highlight"
-        title = strip_urls(title).replace("<", "").replace(">", "")[:100].strip()
+    cliff_banner = cliffhanger_text or derive_cliffhanger_text(
+        transcript, rules.get("cliffhanger_template"), rules.get("streamer") or chan
+    )
 
-        # Strict campaign rule: include "Watch KreekCraft on YouTube and Twitch", required hashtags, NO links/URLs.
+    if campaign_mode:
+        camp_id = rules.get("id") or "kreekcraft-gta6"
+        camp_name = rules.get("name") or "KreekCraft GTA 6"
+        streamer_label = rules.get("streamer") or "KreekCraft"
+        cta = (rules.get("required_cta") if "required_cta" in rules else config.CAMPAIGN_CTA) or ""
+        tags = list(rules.get("required_hashtags") or config.CAMPAIGN_HASHTAGS)
+        no_links = bool(rules.get("no_links", True))
+
+        suffix = camp_name.replace(" Clipping", "")
         if hook_clean:
-            description = f"{hook_clean}\n\n{config.CAMPAIGN_CTA}"
+            title = f"{hook_clean} | {suffix}"
         else:
-            description = config.CAMPAIGN_CTA
-        hashtags = list(config.CAMPAIGN_HASHTAGS)
-        social_caption = f"{config.CAMPAIGN_CTA} #GTA6 #KreekCraft #GrandTheftAutoVI"
+            title = f"{streamer_label} Stream Highlight | {suffix}"
+        if no_links:
+            title = strip_urls(title)
+        title = title.replace("<", "").replace(">", "")[:100].strip()
+
+        if hook_clean and cta:
+            description = f"{hook_clean}\n\n{cta}"
+        elif cta:
+            description = cta
+        else:
+            description = hook_clean or f"{streamer_label} stream highlight"
+        if no_links:
+            description = strip_urls(description)
+
+        tags_str = " ".join(f"#{str(t).lstrip('#')}" for t in tags)
+        social_caption = f"{description} {tags_str}".strip()
         return {
             "title": title,
-            "description": strip_urls(description),
-            "hashtags": hashtags,
+            "description": description,
+            "hashtags": tags,
             "social_caption": social_caption,
+            "cliffhanger_text": cliff_banner,
             "transcript": transcript,
             "channel": chan or "kreekcraft",
+            "campaign_id": camp_id,
             "campaign_mode": True,
-            "add_source_link": False,
+            "add_source_link": not no_links,
             "overlay_applied": config.get_overlay_path() is not None,
         }
 
-    # Non-campaign fallback
+    # General mode (non-campaign editing)
     if hook_clean:
         title = f"{hook_clean} | #{chan}" if chan else hook_clean
     else:
-        title = f"{chan} Live Hype Moment #shorts" if chan else "Live Stream Hype Clip #shorts"
+        title = f"{chan} Live Highlight #shorts" if chan else "Live Stream Highlight Clip #shorts"
     title = title.replace("<", "").replace(">", "")[:100].strip()
 
     desc_parts = []
@@ -186,52 +239,103 @@ def build_default_metadata(
         readable = transcript[:1].upper() + transcript[1:].lower() if transcript.isupper() else transcript
         desc_parts.append(f'"{readable[:350]}"')
     if chan:
-        desc_parts.append(f"Clipped live from https://www.twitch.tv/{chan}")
-    description = "\n\n".join(desc_parts) if desc_parts else "Live stream highlight clip."
+        desc_parts.append(f"Clipped from #{chan}")
+    description = "\n\n".join(desc_parts) if desc_parts else "Highlight clip."
 
-    hashtags = ["shorts"]
-    if chan:
-        hashtags.append(chan)
-    for tag in ("twitch", "gaming", "livestream", "clips"):
-        if tag not in hashtags:
-            hashtags.append(tag)
+    hashtags = list(rules.get("required_hashtags") or ["shorts", "clips", "viral"])
+    if chan and chan not in hashtags:
+        hashtags.insert(1, chan)
 
     return {
         "title": title,
         "description": description,
         "hashtags": hashtags[:5],
+        "cliffhanger_text": cliff_banner,
         "transcript": transcript,
         "channel": chan or None,
+        "campaign_id": "general",
         "campaign_mode": False,
         "add_source_link": True,
-        "overlay_applied": config.get_overlay_path() is not None,
+        "overlay_applied": False,
     }
 
 
-def burn_captions(video_path: Path, srt_path: Path, out_path: Path) -> Path:
-    """Burn bold short-form SRT captions into video_path using ffmpeg."""
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    local_srt = out_path.parent / f".tmp_{srt_path.name}"
-    copied_srt = False
-    if srt_path.resolve().parent != out_path.resolve().parent:
-        shutil.copy2(srt_path, local_srt)
-        copied_srt = True
-        srt_arg = local_srt.name
-    else:
-        srt_arg = srt_path.name
+def _build_cliffhanger_and_captions_ass(
+    srt_path: Path,
+    cliffhanger_text: str | None = None,
+    cliffhanger_duration: float = 4.0,
+) -> str:
+    """Build an ASS script containing BOTH the white-background black-text cliffhanger hook banner
+    at the top of the video AND the bottom word-grouped subtitles."""
+    head = """[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 0
+ScaledBorderAndShadow: yes
 
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Cap,Arial Black,68,&H0000FFFF,&H0000FFFF,&H00000000,&H96000000,-1,0,0,0,100,100,0,0,1,5,2,2,70,70,220,1
+Style: CliffBox,Arial Black,50,&H000A0A0A,&H000A0A0A,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,22,0,8,85,85,235,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    events: list[str] = []
+    if cliffhanger_text:
+        clean_hook = _esc_ass(cliffhanger_text.strip().upper())
+        events.append(
+            f"Dialogue: 2,{_ass_time(0.0)},{_ass_time(max(2.0, cliffhanger_duration))},CliffBox,,0,0,0,,"
+            f"{{\\fad(120,220)}}{clean_hook}"
+        )
+
+    if srt_path.is_file():
+        raw = srt_path.read_text(encoding="utf-8", errors="ignore")
+        for block in re.split(r"\r?\n\r?\n", raw.strip()):
+            lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+            if len(lines) < 2:
+                continue
+            t_line = lines[1] if "-->" in lines[1] else (lines[0] if "-->" in lines[0] else "")
+            if "-->" not in t_line:
+                continue
+            text_lines = lines[2:] if t_line == lines[1] else lines[1:]
+            cue_text = _esc_ass(" ".join(text_lines))
+            if not cue_text:
+                continue
+            m = re.match(
+                r"(\d+):(\d+):(\d+)[,.](\d+)\s*-->\s*(\d+):(\d+):(\d+)[,.](\d+)", t_line
+            )
+            if not m:
+                continue
+            s_sec = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3)) + int(m.group(4)) / 1000.0
+            e_sec = int(m.group(5)) * 3600 + int(m.group(6)) * 60 + int(m.group(7)) + int(m.group(8)) / 1000.0
+            events.append(f"Dialogue: 1,{_ass_time(s_sec)},{_ass_time(e_sec)},Cap,,0,0,0,,{cue_text}")
+
+    return head + "\n".join(events) + "\n"
+
+
+def burn_captions(
+    video_path: Path,
+    srt_path: Path,
+    out_path: Path,
+    cliffhanger_text: str | None = None,
+    cliffhanger_duration: float = 4.0,
+) -> Path:
+    """Burn white-box cliffhanger hook text + bold short-form captions into video_path using ffmpeg."""
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    ass_path = out_path.parent / f".tmp_{out_path.stem}.ass"
     tmp_mp4 = out_path.with_name(f".tmp_{out_path.name}")
-    style = (
-        "FontName=Arial Black,FontSize=18,PrimaryColour=&H0000FFFF,"
-        "OutlineColour=&H00000000,BackColour=&H96000000,Bold=1,"
-        "BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=48"
-    )
     try:
-        has_cues = srt_path.exists() and bool(srt_path.read_text(encoding="utf-8").strip())
+        has_cues = (srt_path.exists() and bool(srt_path.read_text(encoding="utf-8").strip())) or bool(cliffhanger_text)
         if has_cues:
+            ass_content = _build_cliffhanger_and_captions_ass(
+                srt_path, cliffhanger_text=cliffhanger_text, cliffhanger_duration=cliffhanger_duration
+            )
+            ass_path.write_text(ass_content, encoding="utf-8")
             cmd = [
                 "ffmpeg", "-y", "-loglevel", "error", "-i", str(video_path.resolve()),
-                "-vf", f"subtitles={srt_arg}:force_style='{style}'",
+                "-vf", f"ass={ass_path.name}",
                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
                 "-c:a", "copy", "-movflags", "+faststart", tmp_mp4.name,
             ]
@@ -243,8 +347,7 @@ def burn_captions(video_path: Path, srt_path: Path, out_path: Path) -> Path:
             shutil.copy2(video_path, out_path)
         return out_path
     finally:
-        if copied_srt:
-            local_srt.unlink(missing_ok=True)
+        ass_path.unlink(missing_ok=True)
         tmp_mp4.unlink(missing_ok=True)
 
 
@@ -255,13 +358,32 @@ def caption_clip(
     srt_path: Path | None = None,
     channel: str | None = None,
     campaign_mode: bool | None = None,
+    campaign_rules: dict | None = None,
+    cliffhanger_enabled: bool = True,
+    cliffhanger_text: str | None = None,
 ) -> tuple[Path, Path]:
-    """Generate .srt captions via Whisper, write Shorts metadata sidecar, and burn captions onto MP4."""
+    """Generate .srt captions via Whisper, write Shorts metadata sidecar, and burn cliffhanger + captions onto MP4."""
     srt_target = srt_path or out_path.with_suffix(".srt")
     transcribe_to_srt(video_path, srt_target, model_name=model_name)
-    burn_captions(video_path, srt_target, out_path)
+    meta = build_default_metadata(
+        srt_target,
+        channel=channel,
+        campaign_mode=campaign_mode,
+        campaign_rules=campaign_rules,
+        cliffhanger_text=cliffhanger_text,
+    )
+    rules = campaign_rules or {}
+    use_cliff = bool(rules.get("cliffhanger_enabled", cliffhanger_enabled))
+    banner_txt = meta.get("cliffhanger_text") if use_cliff else None
+    banner_dur = float(rules.get("cliffhanger_duration", 4.0))
+    burn_captions(
+        video_path,
+        srt_target,
+        out_path,
+        cliffhanger_text=banner_txt,
+        cliffhanger_duration=banner_dur,
+    )
     meta_path = out_path.with_suffix(".json")
     if not meta_path.exists():
-        meta = build_default_metadata(srt_target, channel=channel, campaign_mode=campaign_mode)
         meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     return out_path, srt_target

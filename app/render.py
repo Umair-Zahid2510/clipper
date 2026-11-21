@@ -20,6 +20,7 @@ DEFAULT_ASPECT = "9:16"
 
 # ASS colours are &HBBGGRR&
 STYLES = {
+    "bw": {"label": "Mono White (B&W)", "font": "Arial Black", "size": 92, "active": "&HFFFFFF&", "upper": True},
     "yellow": {"label": "Bold Yellow", "font": "Arial Black", "size": 92, "active": "&H00F6FF&", "upper": True},
     "green": {"label": "Green Pop", "font": "Arial Black", "size": 92, "active": "&H5CFF4D&", "upper": True},
     "clean": {"label": "Clean White", "font": "Arial", "size": 84, "active": "&HFFD27A&", "upper": False},
@@ -329,6 +330,7 @@ def render_clip(
     aspect: str = DEFAULT_ASPECT,
     facecam: Box | None = None,
     keep: list[tuple[float, float]] | None = None,
+    overlay_path: Path | None = None,
 ) -> dict:
     """Writes <name>.mp4 and <name>.jpg into out_dir. Returns what layout was used.
     `facecam` skips detection (used by tests and by a forced split).
@@ -372,6 +374,12 @@ def render_clip(
         cap_words, cap_start = trim.remap_words(clip_words, start, keep), 0.0
     else:
         out_len, cap_words, cap_start = clip_len, clip_words, start
+    # Automatically generate a cliffhanger white-box hook banner from the first spoken words if hook is None/empty
+    if hook is None and clip_words:
+        first_txt = " ".join(w.text for w in clip_words[:8]).strip()
+        if first_txt:
+            hook = f"WAIT FOR IT: \"{first_txt[:42].upper()}...\""
+
     (out_dir / ass_name).write_text(
         build_ass(cap_words, cap_start, out_len, style, hook, size=(W, H), hook_top=split["top_h"] if split else None),
         encoding="utf-8",
@@ -417,9 +425,31 @@ def render_clip(
             graph += f";[0:a:{i}]aselect='{expr}',asetpts=N/SR/TB[a{i}]"
         audio_maps = [f"[a{i}]" for i in range(tracks)]
 
+    has_ov = overlay_path is not None and overlay_path.is_file()
+    if has_ov:
+        ov_w, ov_h = _probe_size(overlay_path)
+        full_ov = ov_h > 0 and (ov_w / ov_h) <= 0.65 and H > W
+        is_vid_ov = overlay_path.suffix.lower() in (".mov", ".mp4", ".gif")
+        ov_opts = "shortest=1:format=auto" if is_vid_ov else "eof_action=repeat:format=auto"
+        graph = graph.replace("[v]", "[vpre]")
+        if full_ov:
+            graph += f";[1:v]scale={W}:{H}:flags=lanczos[ov];[vpre][ov]overlay=0:0:{ov_opts}[v]"
+        else:
+            bw = 240 if H > W else 200
+            ty = 68 if H > W else 36
+            graph += f";[1:v]scale={bw}:-1:flags=lanczos[ov];[vpre][ov]overlay=(W-w)/2:{ty}:{ov_opts}[v]"
+
+    ov_inputs: list[str] = []
+    if has_ov:
+        if overlay_path.suffix.lower() in (".mov", ".mp4", ".gif"):
+            ov_inputs = ["-stream_loop", "-1", "-i", str(overlay_path)]
+        else:
+            ov_inputs = ["-i", str(overlay_path)]
+
     cmd = [
         "ffmpeg", "-y", "-loglevel", "error",
         "-ss", f"{start:.3f}", "-t", f"{clip_len:.3f}", "-i", str(video),
+        *ov_inputs,
         "-filter_complex", graph, "-map", "[v]", *[x for m in audio_maps for x in ("-map", m)],
         "-r", "30", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", f"{name}.mp4",

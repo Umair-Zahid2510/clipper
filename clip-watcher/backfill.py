@@ -243,8 +243,11 @@ def process_chunk_to_clip(
     vertical_layout: str = "blur",
     campaign_mode: bool = True,
     start_offset: float | None = None,
+    overlay_path: Path | None = None,
+    use_default_overlay: bool = True,
+    campaign_rules: dict | None = None,
 ) -> Path:
-    """Extract a 30s moment from chunk_path, apply logo overlay, and burn Whisper captions."""
+    """Extract a 30s moment from chunk_path, apply logo overlay if campaign requires it, and burn cliffhanger + Whisper captions."""
     offset = pick_best_30s_offset(chunk_path, clip_len=30.0) if start_offset is None else start_offset
     raw_clip = BACKFILL_TEMP_DIR / f"raw_{tag}.mp4"
     out_clip = config.OUTPUT_DIR / f"{tag}.mp4"
@@ -256,6 +259,8 @@ def process_chunk_to_clip(
             duration=30.0,
             vertical_mode=vertical_mode,
             vertical_layout=vertical_layout,
+            overlay_path=overlay_path,
+            use_default_overlay=use_default_overlay,
         )
         chan = tag.split("_")[0] if "_" in tag else "kreekcraft"
         captioner.caption_clip(
@@ -263,6 +268,7 @@ def process_chunk_to_clip(
             out_clip,
             channel=chan,
             campaign_mode=campaign_mode,
+            campaign_rules=campaign_rules,
         )
         return out_clip
     finally:

@@ -13,7 +13,7 @@ from typing import Callable
 
 import requests
 
-from . import config, youtube
+from . import campaigns, config, youtube
 
 SOCIAL_ACCOUNTS_PATH = config.DATA_DIR / "social_accounts.json"
 PLATFORMS = ("youtube", "tiktok", "instagram")
@@ -222,13 +222,21 @@ REQUIRED_CTA = "Watch KreekCraft on YouTube and Twitch"
 REQUIRED_TAGS = ("GTA6", "KreekCraft", "GrandTheftAutoVI")
 
 
-def enforce_kreekcraft_caption(text: str, hashtags: list[str] | None = None) -> str:
-    """Guarantee a social caption has no URLs, includes 'Watch KreekCraft on YouTube and Twitch', and has #GTA6 #KreekCraft #GrandTheftAutoVI."""
-    cleaned = _URL_RE.sub("", text or "").strip()
-    if REQUIRED_CTA.lower() not in cleaned.lower():
-        cleaned = f"{cleaned} {REQUIRED_CTA}! 🔴".strip()
-    tags = [str(t).lstrip("#").strip() for t in (hashtags or list(REQUIRED_TAGS)) if str(t).strip()]
-    for req in reversed(REQUIRED_TAGS):
+def enforce_campaign_caption(text: str, hashtags: list[str] | None = None, campaign_rules: dict | None = None) -> str:
+    """Format a social caption according to the active campaign rules (or leave standard if General Mode)."""
+    rules = campaign_rules or campaigns.get_campaign()
+    is_camp = rules.get("id") != "general"
+    no_links = bool(rules.get("no_links", True)) if is_camp else False
+    req_cta = (rules.get("required_cta") if "required_cta" in rules else REQUIRED_CTA).strip() if is_camp else ""
+    req_tags = list(rules.get("required_hashtags") or REQUIRED_TAGS) if is_camp else []
+
+    cleaned = _URL_RE.sub("", text or "").strip() if no_links else (text or "").strip()
+    if req_cta:
+        core_cta = re.sub(r"[^\w\s]+$", "", req_cta).strip().lower()
+        if core_cta and core_cta not in cleaned.lower():
+            cleaned = f"{cleaned} {req_cta}".strip()
+    tags = [str(t).lstrip("#").strip() for t in (hashtags or req_tags or ["shorts"]) if str(t).strip()]
+    for req in reversed(req_tags):
         if req.lower() not in [t.lower() for t in tags]:
             tags.insert(0, req)
     missing_tag_strs = [f"#{t.replace(' ', '')}" for t in tags if f"#{t.lower()}" not in cleaned.lower()]
@@ -237,26 +245,42 @@ def enforce_kreekcraft_caption(text: str, hashtags: list[str] | None = None) -> 
     return cleaned[:2200]
 
 
+def enforce_kreekcraft_caption(text: str, hashtags: list[str] | None = None) -> str:
+    return enforce_campaign_caption(text, hashtags)
+
+
 # ---------- Platform-Specific Payload Builders ----------
 
 def build_platform_payloads(item: dict) -> dict[str, dict]:
     """Build the exact API request payload for YouTube Shorts, TikTok, and Instagram Reels."""
-    title = _URL_RE.sub("", (item.get("title") or "KreekCraft GTA 6 Highlight")).strip()
-    raw_desc = _URL_RE.sub("", (item.get("description") or "Watch KreekCraft on YouTube and Twitch! 🔴")).strip()
-    if REQUIRED_CTA.lower() not in raw_desc.lower():
-        raw_desc = f"{raw_desc}\n\n{REQUIRED_CTA}! 🔴".strip()
-    tags = [str(t).lstrip("#").strip() for t in (item.get("hashtags") or list(REQUIRED_TAGS)) if str(t).strip()]
-    for req in reversed(REQUIRED_TAGS):
+    rules = campaigns.get_campaign(item.get("campaign_id"))
+    is_camp = rules.get("id") != "general"
+    no_links = bool(rules.get("no_links", True)) if is_camp else False
+    req_cta = (rules.get("required_cta") if "required_cta" in rules else REQUIRED_CTA).strip() if is_camp else ""
+    req_tags = list(rules.get("required_hashtags") or REQUIRED_TAGS) if is_camp else ["shorts"]
+
+    raw_title = (item.get("title") or "Clip Highlight").strip()
+    title = _URL_RE.sub("", raw_title).strip() if no_links else raw_title
+    raw_desc = (item.get("description") or req_cta).strip()
+    if no_links:
+        raw_desc = _URL_RE.sub("", raw_desc).strip()
+    if req_cta:
+        core_cta = re.sub(r"[^\w\s]+$", "", req_cta).strip().lower()
+        if core_cta and core_cta not in raw_desc.lower():
+            raw_desc = f"{raw_desc}\n\n{req_cta}".strip()
+    tags = [str(t).lstrip("#").strip() for t in (item.get("hashtags") or req_tags) if str(t).strip()]
+    for req in reversed(req_tags if is_camp else []):
         if req.lower() not in [t.lower() for t in tags]:
             tags.insert(0, req)
 
     # Combined social caption for TikTok & Instagram Reels (where caption + hashtags live in one field)
-    combined_caption = enforce_kreekcraft_caption(raw_desc, tags)
+    combined_caption = enforce_campaign_caption(raw_desc, tags, rules)
 
     # 1. YouTube Shorts payload
     yt_priv = item.get("privacy") or "public"
     if yt_priv not in youtube.PRIVACY:
         yt_priv = "public"
+    src_url = None if no_links else (item.get("source_url") if item.get("add_source_link") else None)
     try:
         yt_meta = youtube.build_metadata(
             title=title,
@@ -264,7 +288,7 @@ def build_platform_payloads(item: dict) -> dict[str, dict]:
             hashtags=tags,
             privacy=yt_priv,
             made_for_kids=bool(item.get("made_for_kids", False)),
-            source_url=None,  # Campaign rule: never include links or URLs in the caption
+            source_url=src_url,
         )
     except ValueError:
         yt_meta = {"snippet": {"title": title[:100], "description": combined_caption, "tags": tags}, "status": {"privacyStatus": yt_priv, "selfDeclaredMadeForKids": False}}
@@ -281,7 +305,7 @@ def build_platform_payloads(item: dict) -> dict[str, dict]:
     tt_opts = item.get("tiktok_options") or {}
     tt_privacy = tt_opts.get("privacy_level") or "PUBLIC_TO_EVERYONE"
     tt_mode = tt_opts.get("post_mode") or "DIRECT_POST"
-    tt_caption = enforce_kreekcraft_caption(tt_opts.get("caption") or combined_caption, tags)
+    tt_caption = enforce_campaign_caption(tt_opts.get("caption") or combined_caption, tags, rules)
     tt_endpoint = (
         "POST https://open.tiktokapis.com/v2/post/publish/inbox/video/init/"
         if tt_mode == "MEDIA_UPLOAD"
@@ -311,7 +335,7 @@ def build_platform_payloads(item: dict) -> dict[str, dict]:
     ig_opts = item.get("instagram_options") or {}
     ig_acc = get_account_credentials("instagram", ig_opts.get("account_id"))
     ig_uid = (ig_acc or {}).get("ig_user_id") or "{ig_user_id}"
-    ig_caption = enforce_kreekcraft_caption(ig_opts.get("caption") or combined_caption, tags)
+    ig_caption = enforce_campaign_caption(ig_opts.get("caption") or combined_caption, tags, rules)
     ig_payload = {
         "platform": "instagram",
         "endpoint": f"POST https://graph.facebook.com/v21.0/{ig_uid}/media",

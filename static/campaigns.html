@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>clipper.io — Campaigns, Rules &amp; Cliffhanger Studio</title>
+<style>
+  :root {
+    --bg: #050505; --panel: #0e0e0e; --panel-2: #171717; --line: #262626;
+    --text: #fafafa; --muted: #a1a1aa; --accent: #ffffff; --accent-ink: #050505;
+    --good: #e4e4e7; --bad: #f87171; --ring: #ffffff;
+    --f-body: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+    --f-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 var(--f-body); -webkit-font-smoothing: antialiased; }
+  :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+  a { color: var(--text); text-underline-offset: 3px; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 22px 80px; }
+
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 20px 0; border-bottom: 1px solid var(--line); }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 19px; letter-spacing: -.03em; text-decoration: none; color: var(--text); }
+  .brand i { width: 26px; height: 26px; border-radius: 6px; background: var(--text); color: var(--bg); display: grid; place-items: center; font-style: normal; font-weight: 900; font-size: 14px; }
+  .nav { display: inline-flex; gap: 4px; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; }
+  .nav a { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 0 14px; border-radius: 999px;
+    font-size: 13px; font-weight: 600; color: var(--muted); text-decoration: none; transition: all .15s; }
+  .nav a:hover { color: var(--text); }
+  .nav a[aria-current="page"] { background: var(--accent); color: var(--accent-ink); }
+  .badge-pill { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; padding: 6px 13px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); color: var(--text); font-weight: 600; }
+
+  .hero { padding: 28px 0 18px; display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; border-bottom: 1px solid var(--line); }
+  h1 { font-size: clamp(26px, 3.8vw, 38px); line-height: 1.1; margin: 0 0 8px; letter-spacing: -.035em; font-weight: 800; }
+  .hero p { color: var(--muted); margin: 0; max-width: 680px; font-size: 14.5px; }
+
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; border: 0; border-radius: 8px; font-weight: 600; transition: all .14s; }
+  input[type=text], input[type=number], select, textarea {
+    width: 100%; min-height: 40px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font-size: 14px;
+  }
+  input:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; border-color: #fff; }
+  .go { background: #fff; color: #000; padding: 0 18px; min-height: 40px; font-weight: 700; }
+  .go:hover:not(:disabled) { background: #e4e4e7; }
+  .ghost { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 38px; padding: 0 14px;
+    background: transparent; color: var(--text); border: 1px solid var(--line); text-decoration: none; font-size: 13px; border-radius: 8px; }
+  .ghost:hover:not(:disabled) { background: var(--panel-2); border-color: #52525b; }
+
+  .layout { display: grid; grid-template-columns: 320px 1fr; gap: 20px; margin-top: 22px; align-items: start; }
+  .sidebar { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: grid; gap: 10px; }
+  .side-head { display: flex; align-items: center; justify-content: space-between; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 4px 6px; }
+  .camp-list { display: grid; gap: 8px; }
+  .camp-card { text-align: left; padding: 12px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); display: grid; gap: 4px; cursor: pointer; }
+  .camp-card:hover { border-color: #52525b; }
+  .camp-card.active { background: #fff; color: #000; border-color: #fff; }
+  .camp-card.active small, .camp-card.active .c-tag { color: #3f3f46; }
+  .camp-card b { font-size: 14px; display: flex; align-items: center; justify-content: space-between; }
+  .camp-card small { color: var(--muted); font-size: 12px; }
+
+  .editor { display: grid; gap: 18px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; display: grid; gap: 14px; }
+  .panel h2 { margin: 0; font-size: 16px; letter-spacing: -.01em; display: flex; align-items: center; justify-content: space-between; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  .lbl { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted); margin-bottom: 5px; }
+
+  /* Live Cliffhanger Hook & Overlay Preview Frame */
+  .preview-wrap { display: grid; grid-template-columns: 1fr 220px; gap: 18px; align-items: center; }
+  .phone-mock { width: 210px; aspect-ratio: 9/16; background: linear-gradient(165deg, #1f1f23 0%, #09090b 60%, #18181b 100%);
+    border: 2px solid #3f3f46; border-radius: 22px; position: relative; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; padding: 14px 10px; box-shadow: 0 20px 50px rgba(0,0,0,.8); }
+  .mock-ov { width: 78px; max-height: 36px; object-fit: contain; margin: 2px auto 0; display: block; }
+  .mock-cliff { background: #ffffff; color: #050505; font-weight: 900; font-size: 11px; line-height: 1.25; text-align: center;
+    padding: 7px 9px; border-radius: 6px; text-transform: uppercase; letter-spacing: -.01em; box-shadow: 0 6px 18px rgba(0,0,0,.55); margin-top: 6px; }
+  .mock-sub { text-align: center; font-weight: 900; font-size: 12px; color: #fff; text-shadow: 0 2px 0 #000, 0 0 8px #000; margin-bottom: 18px; text-transform: uppercase; }
+
+  .ov-box { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .ov-box img { width: 48px; height: 48px; object-fit: contain; background: #000; border: 1px solid var(--line); border-radius: 8px; }
+  .file-btn { position: relative; overflow: hidden; }
+  .file-btn input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+
+  @media (max-width: 860px) {
+    .layout, .preview-wrap, .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    .phone-mock { margin: 0 auto; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="brand" href="/"><i>C</i>clipper.io</a>
+    <nav class="nav" aria-label="Mode">
+      <a href="/">Video to Shorts</a>
+      <a href="/watcher">Live Stream</a>
+      <a href="/campaigns" aria-current="page">Campaigns &amp; Rules</a>
+      <a href="/posts">Posts &amp; Socials</a>
+    </nav>
+    <div class="badge-pill" id="activeModePill">Active: Loading...</div>
+  </header>
+
+  <main>
+    <div class="hero">
+      <div>
+        <h1>Campaign Rules &amp; Cliffhanger Studio</h1>
+        <p>Switch between <b>General Mode</b> (standard edits, no forced campaign overlay or CTA) and custom <b>Streamer Campaigns</b> (mandatory logo overlay throughout the clip, strict caption CTA &amp; hashtags, no-URL enforcement, and white-box cliffhanger hook banners).</p>
+      </div>
+      <button type="button" class="go" id="newCampBtn">+ New Campaign Profile</button>
+    </div>
+
+    <div class="layout">
+      <!-- Left Sidebar: Profiles List -->
+      <aside class="sidebar">
+        <div class="side-head">
+          <span>Editing Profiles</span>
+          <span id="profileCount">2</span>
+        </div>
+        <div class="camp-list" id="campList"></div>
+      </aside>
+
+      <!-- Right Main Editor -->
+      <div class="editor">
+        <!-- Smart Brief Auto-Parser -->
+        <section class="panel">
+          <h2>
+            <span>⚡ Paste Campaign Rules Brief (Auto-Fill Rules)</span>
+            <button type="button" class="ghost" id="parseBriefBtn">Extract Rules from Brief</button>
+          </h2>
+          <textarea id="briefInput" rows="3" placeholder="Paste any ClipLaunch / Notion / Discord campaign brief here (e.g. CPM: $1 per 1,000 views, Include 'Watch ...', #Hashtags, No links) and click Extract Rules..."></textarea>
+        </section>
+
+        <!-- Active Campaign / General Profile Settings -->
+        <section class="panel">
+          <h2>
+            <span id="editorTitle">Profile Configuration</span>
+            <div style="display:flex;gap:8px">
+              <button type="button" class="ghost" id="deleteCampBtn" hidden>Delete Profile</button>
+              <button type="button" class="go" id="saveCampBtn">Save &amp; Activate Profile</button>
+            </div>
+          </h2>
+
+          <input type="hidden" id="cId">
+          <div class="grid-2">
+            <div>
+              <label class="lbl">Profile / Campaign Name *</label>
+              <input type="text" id="cName" placeholder="e.g. KreekCraft GTA 6 Clipping">
+            </div>
+            <div>
+              <label class="lbl">Streamer / Creator Name</label>
+              <input type="text" id="cStreamer" placeholder="e.g. KreekCraft">
+            </div>
+          </div>
+
+          <!-- Logo Overlay Section -->
+          <div>
+            <label class="lbl">Campaign Logo Overlay (Composited 0:00 to End of Video)</label>
+            <div class="ov-box">
+              <div style="display:flex;align-items:center;gap:12px">
+                <img id="cOvImg" hidden alt="Overlay logo">
+                <div>
+                  <b id="cOvStatus" style="display:block;font-size:13.5px">No overlay uploaded</b>
+                  <small style="color:var(--muted);font-size:12px">PNG, WebP, GIF, MOV, or MP4 · Shown when "Require Logo Overlay" is checked below</small>
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;margin-right:8px">
+                  <input type="checkbox" id="cReqOverlay" style="width:16px;height:16px;accent-color:#fff">
+                  Require Logo Overlay
+                </label>
+                <label class="ghost file-btn">
+                  <span>Upload Logo File</span>
+                  <input type="file" id="cOvFile" accept=".png,.webp,.gif,.mov,.mp4,image/*,video/*">
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Cliffhanger White-Background Hook Box Studio -->
+          <div class="preview-wrap" style="background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:14px">
+            <div style="display:grid;gap:10px">
+              <div style="display:flex;align-items:center;justify-content:space-between">
+                <b style="font-size:14.5px">White-Background Cliffhanger Hook Banner</b>
+                <label style="display:inline-flex;align-items:center;gap:7px;font-size:13px;cursor:pointer">
+                  <input type="checkbox" id="cCliffEnabled" checked style="width:16px;height:16px;accent-color:#fff">
+                  Burn Cliffhanger Box into Videos
+                </label>
+              </div>
+              <p style="margin:0;color:var(--muted);font-size:12.5px">Renders a high-contrast solid white rounded box with bold black text at the top of the video for the first few seconds to hook viewers immediately.</p>
+              <div class="grid-2">
+                <div>
+                  <label class="lbl">Cliffhanger Prefix / Template</label>
+                  <input type="text" id="cCliffTemplate" placeholder="WAIT FOR IT... 😱 (or use {hook})">
+                </div>
+                <div>
+                  <label class="lbl">Banner Duration (seconds)</label>
+                  <input type="number" id="cCliffDuration" min="1.5" max="15" step="0.5" value="4.0">
+                </div>
+              </div>
+            </div>
+
+            <!-- 9:16 Visual Preview -->
+            <div class="phone-mock" aria-label="9:16 Video Preview">
+              <div>
+                <img id="mockOv" class="mock-ov" hidden alt="">
+                <div id="mockCliff" class="mock-cliff">WAIT FOR IT... 😱 — "WHAT IS HAPPENING?!"</div>
+              </div>
+              <div class="mock-sub">CHAT IS GOING CRAZY!</div>
+            </div>
+          </div>
+
+          <!-- Caption & Hashtag Rules -->
+          <div class="grid-2">
+            <div>
+              <label class="lbl">Mandatory Caption CTA Line (Leave empty in General Mode)</label>
+              <input type="text" id="cCta" placeholder="Watch KreekCraft on YouTube and Twitch! 🔴">
+            </div>
+            <div>
+              <label class="lbl">Required Hashtags (space or comma separated)</label>
+              <input type="text" id="cTags" placeholder="#GTA6 #KreekCraft #GrandTheftAutoVI">
+            </div>
+          </div>
+
+          <div class="grid-3">
+            <div>
+              <label class="lbl">Campaign CPM ($ / 1,000 views)</label>
+              <input type="number" id="cCpm" min="0" step="0.1" value="1.0">
+            </div>
+            <div>
+              <label class="lbl">Max Payout Per Clip ($)</label>
+              <input type="number" id="cMaxPay" min="0" step="10" value="300">
+            </div>
+            <div>
+              <label class="lbl">Min Engagement Rate (%)</label>
+              <input type="number" id="cMinEng" min="0" step="0.1" value="0.8">
+            </div>
+          </div>
+
+          <div>
+            <label class="lbl">Official Stream / Source URLs (one per line or comma-separated)</label>
+            <textarea id="cUrls" rows="2" placeholder="https://www.youtube.com/live/dy-oCN2NxfA&#10;https://www.twitch.tv/kreekcraft"></textarea>
+          </div>
+
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+            <label style="display:inline-flex;align-items:center;gap:8px;font-size:13.5px;cursor:pointer">
+              <input type="checkbox" id="cNoLinks" checked style="width:16px;height:16px;accent-color:#fff">
+              <b>Strict No-Links Rule:</b> Strip all URLs/links from titles and captions across YouTube, TikTok &amp; Instagram
+            </label>
+            <span id="saveMsg" style="font-size:13px;color:var(--text)"></span>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+let state = { active_id: "kreekcraft-gta6", campaigns: [] };
+let editingId = null;
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
+  return data;
+}
+
+function updateMockPreview() {
+  const cliffOn = $("#cCliffEnabled").checked;
+  const tmpl = $("#cCliffTemplate").value.trim();
+  const mockCliff = $("#mockCliff");
+  mockCliff.hidden = !cliffOn;
+  mockCliff.textContent = tmpl ? `${tmpl.toUpperCase()} — "WHAT JUST HAPPENED?!"` : `WAIT FOR IT: "WHAT JUST HAPPENED?!"`;
+  const reqOv = $("#cReqOverlay").checked;
+  const ovImg = $("#cOvImg");
+  $("#mockOv").hidden = !(reqOv && !ovImg.hidden && ovImg.src);
+  if (!ovImg.hidden && ovImg.src) $("#mockOv").src = ovImg.src;
+}
+
+["#cCliffEnabled", "#cCliffTemplate", "#cReqOverlay"].forEach((sel) => {
+  $(sel).addEventListener("input", updateMockPreview);
+  $(sel).addEventListener("change", updateMockPreview);
+});
+
+function loadIntoForm(c) {
+  editingId = c.id;
+  $("#cId").value = c.id || "";
+  $("#cName").value = c.name || "";
+  $("#cStreamer").value = c.streamer || "";
+  $("#cCta").value = c.required_cta || "";
+  $("#cTags").value = (c.required_hashtags || []).map((t) => "#" + String(t).replace(/^#+/, "")).join(" ");
+  $("#cNoLinks").checked = !!c.no_links;
+  $("#cReqOverlay").checked = !!c.require_overlay;
+  $("#cCliffEnabled").checked = c.cliffhanger_enabled !== false;
+  $("#cCliffTemplate").value = c.cliffhanger_template || "";
+  $("#cCliffDuration").value = c.cliffhanger_duration || 4.0;
+  $("#cCpm").value = c.cpm_usd ?? 1.0;
+  $("#cMaxPay").value = c.max_payout_usd ?? 300;
+  $("#cMinEng").value = c.min_engagement_pct ?? 0.8;
+  $("#cUrls").value = (c.stream_urls || []).join("\n");
+  $("#editorTitle").textContent = c.id === "general" ? "General Mode (Standard Editing)" : `Campaign Profile: ${c.name}`;
+  $("#deleteCampBtn").hidden = (c.id === "general" || c.id === "kreekcraft-gta6" || !c.id);
+
+  const img = $("#cOvImg");
+  if (c.overlay_present && c.overlay_url) {
+    img.src = `${c.overlay_url}?t=${Date.now()}`;
+    img.hidden = false;
+    $("#cOvStatus").textContent = `Active Overlay: ${c.overlay_filename}`;
+  } else {
+    img.hidden = true;
+    $("#cOvStatus").textContent = c.id === "general" ? "No overlay required in General Mode" : "No logo overlay uploaded yet";
+  }
+  updateMockPreview();
+}
+
+function renderSidebar() {
+  const active = state.campaigns.find((x) => x.id === state.active_id) || state.campaigns[0];
+  $("#activeModePill").textContent = active ? `Active: ${active.name}` : "Active: General";
+  $("#profileCount").textContent = String(state.campaigns.length);
+  $("#campList").innerHTML = state.campaigns.map((c) => `
+    <div class="camp-card ${c.id === state.active_id ? "active" : ""}" data-id="${esc(c.id)}">
+      <b><span>${esc(c.name)}</span><span>${c.id === state.active_id ? "● Active" : ""}</span></b>
+      <small>${c.id === "general" ? "Standard editing · No forced overlay/CTA" : `${esc(c.streamer || "Campaign")} · $${c.cpm_usd}/1K · ${c.require_overlay ? "Logo Overlay" : "No Overlay"}`}</small>
+    </div>
+  `).join("");
+}
+
+$("#campList").addEventListener("click", async (e) => {
+  const card = e.target.closest("[data-id]");
+  if (!card) return;
+  const cid = card.dataset.id;
+  try {
+    state = await api("/api/campaigns/select", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaign_id: cid }),
+    });
+    const cur = state.campaigns.find((x) => x.id === cid);
+    if (cur) loadIntoForm(cur);
+    renderSidebar();
+    $("#saveMsg").textContent = `Switched active mode to "${cur?.name}"`;
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+$("#newCampBtn").addEventListener("click", () => {
+  loadIntoForm({
+    id: "",
+    name: "New Streamer Campaign",
+    streamer: "",
+    required_cta: "",
+    required_hashtags: ["shorts", "gaming"],
+    no_links: true,
+    require_overlay: true,
+    cliffhanger_enabled: true,
+    cliffhanger_template: "WAIT FOR IT... 😱",
+    cliffhanger_duration: 4.0,
+    cpm_usd: 1.0,
+    max_payout_usd: 300.0,
+    min_engagement_pct: 0.8,
+    stream_urls: [],
+  });
+  $("#cName").focus();
+});
+
+$("#parseBriefBtn").addEventListener("click", async () => {
+  const brief = $("#briefInput").value.trim();
+  if (!brief) { alert("Paste a campaign rules brief first."); return; }
+  try {
+    const parsed = await api("/api/campaigns/parse-brief", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ brief }),
+    });
+    loadIntoForm({ id: "", ...parsed });
+    $("#saveMsg").textContent = "Extracted rules from brief! Click 'Save & Activate Profile' to apply.";
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+$("#saveCampBtn").addEventListener("click", async () => {
+  const payload = {
+    id: $("#cId").value.trim() || undefined,
+    name: $("#cName").value.trim(),
+    streamer: $("#cStreamer").value.trim(),
+    required_cta: $("#cCta").value.trim(),
+    required_hashtags: $("#cTags").value.trim(),
+    no_links: $("#cNoLinks").checked,
+    require_overlay: $("#cReqOverlay").checked,
+    cliffhanger_enabled: $("#cCliffEnabled").checked,
+    cliffhanger_template: $("#cCliffTemplate").value.trim(),
+    cliffhanger_duration: Number($("#cCliffDuration").value || 4.0),
+    cpm_usd: Number($("#cCpm").value || 0),
+    max_payout_usd: Number($("#cMaxPay").value || 0),
+    min_engagement_pct: Number($("#cMinEng").value || 0),
+    stream_urls: $("#cUrls").value.trim(),
+    set_active: true,
+  };
+  try {
+    state = await api("/api/campaigns", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    renderSidebar();
+    const cur = state.campaigns.find((x) => x.id === state.active_id);
+    if (cur) loadIntoForm(cur);
+    $("#saveMsg").textContent = "Saved & Activated!";
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+$("#cOvFile").addEventListener("change", async () => {
+  const file = $("#cOvFile").files[0];
+  if (!file) return;
+  let cid = $("#cId").value.trim();
+  if (!cid) {
+    // Save new campaign first so it has an ID
+    await $("#saveCampBtn").click();
+    cid = $("#cId").value.trim();
+  }
+  const fd = new FormData();
+  fd.append("file", file);
+  try {
+    state = await api(`/api/campaigns/${encodeURIComponent(cid)}/overlay`, {
+      method: "POST",
+      body: fd,
+    });
+    renderSidebar();
+    const cur = state.campaigns.find((x) => x.id === cid);
+    if (cur) loadIntoForm(cur);
+    $("#saveMsg").textContent = "Logo overlay uploaded!";
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    $("#cOvFile").value = "";
+  }
+});
+
+$("#deleteCampBtn").addEventListener("click", async () => {
+  const cid = $("#cId").value.trim();
+  if (!cid || !confirm("Delete this campaign profile?")) return;
+  try {
+    state = await api(`/api/campaigns/${encodeURIComponent(cid)}`, { method: "DELETE" });
+    renderSidebar();
+    const cur = state.campaigns.find((x) => x.id === state.active_id) || state.campaigns[0];
+    if (cur) loadIntoForm(cur);
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+async function init() {
+  state = await api("/api/campaigns");
+  renderSidebar();
+  const cur = state.campaigns.find((x) => x.id === state.active_id) || state.campaigns[0];
+  if (cur) loadIntoForm(cur);
+}
+init();
+</script>
+</body>
+</html>

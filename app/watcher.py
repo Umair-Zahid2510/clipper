@@ -15,7 +15,7 @@ from urllib.parse import parse_qs, urlparse
 
 from pydantic import BaseModel, Field
 
-from . import config as app_config
+from . import campaigns, config as app_config
 
 _CW_DIR = str(app_config.ROOT / "clip-watcher")
 if _CW_DIR not in sys.path:
@@ -130,22 +130,49 @@ def parse_stream_target(raw: str) -> str:
     return parse_stream_info(raw)["channel"]
 
 
-def evaluate_campaign_compliance(title: str, description: str, hashtags: list[str], add_source_link: bool, overlay_applied: bool) -> dict:
-    """Check a clip's metadata and overlay against the KreekCraft GTA 6 Clipping rules brief."""
+def evaluate_campaign_compliance(
+    title: str,
+    description: str,
+    hashtags: list[str],
+    add_source_link: bool,
+    overlay_applied: bool,
+    campaign_rules: dict | None = None,
+) -> dict:
+    """Check a clip's metadata and overlay against the active campaign profile rules."""
+    rules = campaign_rules or campaigns.get_campaign()
+    if rules.get("id") == "general":
+        return {
+            "compliant": True,
+            "overlay_ok": True,
+            "cta_ok": True,
+            "tags_ok": True,
+            "no_links_ok": True,
+            "campaign_name": "General Mode",
+        }
     desc_low = (description or "").lower()
-    cta_ok = "watch kreekcraft on youtube and twitch" in desc_low
+    req_cta = (rules.get("required_cta") or "watch kreekcraft on youtube and twitch").strip()
+    # Compare core CTA words (strip trailing emojis/punctuation)
+    core_cta = re.sub(r"[^\w\s]+$", "", req_cta).strip().lower()
+    cta_ok = (not core_cta) or (core_cta in desc_low)
     tag_set = {str(t).lstrip("#").strip().lower() for t in (hashtags or [])}
-    required_tags = {"gta6", "kreekcraft", "grandtheftautovi"}
-    tags_ok = required_tags.issubset(tag_set) or all(f"#{r}" in desc_low for r in required_tags)
-    has_url = bool(captioner._URL_RE.search(description or "")) or bool(captioner._URL_RE.search(title or "")) or bool(add_source_link)
-    no_links_ok = not has_url
-    overlay_ok = bool(overlay_applied or cw_config.get_overlay_path() is not None)
+    required_tags = {str(t).lstrip("#").strip().lower() for t in (rules.get("required_hashtags") or []) if str(t).strip()}
+    tags_ok = (not required_tags) or required_tags.issubset(tag_set) or all(f"#{r}" in desc_low for r in required_tags)
+    if rules.get("no_links", True):
+        has_url = bool(captioner._URL_RE.search(description or "")) or bool(captioner._URL_RE.search(title or "")) or bool(add_source_link)
+        no_links_ok = not has_url
+    else:
+        no_links_ok = True
+    if rules.get("require_overlay", True):
+        overlay_ok = bool(overlay_applied or campaigns.get_overlay_path_for_campaign(rules.get("id")) is not None or cw_config.get_overlay_path() is not None)
+    else:
+        overlay_ok = True
     return {
         "compliant": bool(cta_ok and tags_ok and no_links_ok and overlay_ok),
         "overlay_ok": overlay_ok,
         "cta_ok": cta_ok,
         "tags_ok": tags_ok,
         "no_links_ok": no_links_ok,
+        "campaign_name": rules.get("name"),
     }
 
 
@@ -184,20 +211,30 @@ class WatcherController:
         self._lock = asyncio.Lock()
         self._recover_interrupted_uploads()
 
+    def active_campaign(self) -> dict:
+        return campaigns.get_campaign()
+
     def overlay_status(self) -> dict:
-        p = cw_config.get_overlay_path()
+        camp = self.active_campaign()
+        p = campaigns.get_overlay_path_for_campaign(camp.get("id")) or cw_config.get_overlay_path()
         return {
             "present": p is not None,
             "filename": p.name if p else None,
             "url": f"/watcher-assets/{p.name}" if p else None,
+            "campaign_id": camp.get("id"),
+            "campaign_name": camp.get("name"),
+            "required": bool(camp.get("require_overlay", True)),
         }
 
-    def save_overlay(self, filename: str, content: bytes) -> dict:
+    def save_overlay(self, filename: str, content: bytes, campaign_id: str | None = None) -> dict:
         ext = Path(filename or "").suffix.lower()
         if ext not in _OVERLAY_EXTS:
             raise ValueError("Upload a PNG, WebP, GIF, MOV, or MP4 logo overlay file.")
         if not content:
             raise ValueError("Uploaded overlay file is empty.")
+        cid = campaign_id or self.active_campaign().get("id") or "kreekcraft-gta6"
+        if cid != "general":
+            campaigns.save_campaign_overlay(cid, filename, content)
         cw_config.ASSETS_DIR.mkdir(parents=True, exist_ok=True)
         for old in cw_config.ASSETS_DIR.glob("logo_overlay.*"):
             old.unlink(missing_ok=True)
@@ -514,6 +551,9 @@ class WatcherController:
             raw_path = cw_config.TEMP_DIR / f"raw_{self.channel}_{stamp}.mp4"
             out_path = cw_config.OUTPUT_DIR / f"{self.channel}_{stamp}.mp4"
             try:
+                camp = self.active_campaign()
+                is_camp = camp.get("id") != "general" and self.campaign_mode
+                ov_path = campaigns.get_overlay_path_for_campaign(camp.get("id")) if is_camp else None
                 self.status_note = f"Extracting 30s clip for spike at {stamp}..."
                 await asyncio.to_thread(
                     clipper.extract_spike_from_buffer,
@@ -522,14 +562,17 @@ class WatcherController:
                     raw_path,
                     vertical_mode=self.vertical_mode,
                     vertical_layout=self.vertical_layout,
+                    overlay_path=ov_path,
+                    use_default_overlay=is_camp,
                 )
-                self.status_note = f"Burning Whisper captions into {out_path.name}..."
+                self.status_note = f"Burning cliffhanger hook & captions into {out_path.name}..."
                 await asyncio.to_thread(
                     captioner.caption_clip,
                     raw_path,
                     out_path,
                     channel=self.channel,
-                    campaign_mode=self.campaign_mode,
+                    campaign_mode=is_camp,
+                    campaign_rules=camp,
                 )
                 self.status_note = f"Exported {out_path.name}"
                 if self.auto_post and self.on_clip_exported:
@@ -576,6 +619,9 @@ class WatcherController:
                 offset = 3.0
                 self.status_note = "Cutting 30s clip from sample stream..."
 
+            camp = self.active_campaign()
+            is_camp = camp.get("id") != "general" and self.campaign_mode
+            ov_path = campaigns.get_overlay_path_for_campaign(camp.get("id")) if is_camp else None
             await asyncio.to_thread(
                 clipper.extract_clip,
                 chosen,
@@ -584,14 +630,17 @@ class WatcherController:
                 duration=30.0,
                 vertical_mode=self.vertical_mode,
                 vertical_layout=self.vertical_layout,
+                overlay_path=ov_path,
+                use_default_overlay=is_camp,
             )
-            self.status_note = f"Transcribing & burning captions into {out_path.name}..."
+            self.status_note = f"Transcribing & burning cliffhanger + captions into {out_path.name}..."
             await asyncio.to_thread(
                 captioner.caption_clip,
                 raw_path,
                 out_path,
                 channel=self.channel,
-                campaign_mode=self.campaign_mode,
+                campaign_mode=is_camp,
+                campaign_rules=camp,
             )
             self.status_note = f"Exported {out_path.name}"
             if self.auto_post and self.on_clip_exported:
@@ -719,14 +768,20 @@ class WatcherController:
                         continue
                     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     tag = f"{chan}_catchup{idx:02d}_{stamp}"
+                    camp = self.active_campaign()
+                    is_camp = camp.get("id") != "general" and self.campaign_mode
+                    ov_path = campaigns.get_overlay_path_for_campaign(camp.get("id")) if is_camp else None
                     out_clip = await asyncio.to_thread(
                         backfill.process_chunk_to_clip,
                         slice_ts,
                         tag,
                         self.vertical_mode,
                         self.vertical_layout,
-                        self.campaign_mode,
+                        is_camp,
                         0.0,
+                        ov_path,
+                        is_camp,
+                        camp,
                     )
                     made += 1
                     self.backfill_clips_count = max(self.backfill_clips_count, made)
@@ -757,16 +812,23 @@ class WatcherController:
 
     def list_clips(self) -> list[dict]:
         clips = []
+        active_camp = self.active_campaign()
         files = [p for p in cw_config.OUTPUT_DIR.glob("*.mp4") if not p.name.startswith(".tmp_")]
         for p in sorted(files, key=lambda x: x.stat().st_mtime, reverse=True):
             st = p.stat()
             srt = p.with_suffix(".srt")
             meta = self.read_meta(p)
+            cid = meta.get("campaign_id") or active_camp.get("id")
+            camp_rules = campaigns.get_campaign(cid)
+            is_camp = camp_rules.get("id") != "general"
             title = meta.get("title") or p.stem
             desc = meta.get("description") or ""
-            tags = meta.get("hashtags") or list(cw_config.CAMPAIGN_HASHTAGS)
-            add_link = False if self.campaign_mode else bool(meta.get("add_source_link", True))
-            ov_applied = bool(meta.get("overlay_applied") or cw_config.get_overlay_path() is not None)
+            tags = meta.get("hashtags") or list(camp_rules.get("required_hashtags") or cw_config.CAMPAIGN_HASHTAGS)
+            add_link = False if (is_camp and camp_rules.get("no_links", True)) else bool(meta.get("add_source_link", True))
+            ov_applied = bool(meta.get("overlay_applied") or (is_camp and cw_config.get_overlay_path() is not None))
+            cliff_txt = meta.get("cliffhanger_text") or captioner.derive_cliffhanger_text(
+                meta.get("transcript") or "", camp_rules.get("cliffhanger_template"), camp_rules.get("streamer")
+            )
             clips.append({
                 "name": p.name,
                 "video": f"/watcher-media/{p.name}",
@@ -776,14 +838,17 @@ class WatcherController:
                 "title": title,
                 "description": desc,
                 "hashtags": tags,
-                "social_caption": meta.get("social_caption") or f"{cw_config.CAMPAIGN_CTA} #GTA6 #KreekCraft #GrandTheftAutoVI",
+                "cliffhanger_text": cliff_txt,
+                "campaign_id": camp_rules.get("id"),
+                "campaign_name": camp_rules.get("name"),
+                "social_caption": meta.get("social_caption") or f"{desc} {' '.join('#' + str(t).lstrip('#') for t in tags)}".strip(),
                 "transcript": meta.get("transcript") or "",
                 "channel": meta.get("channel") or self.channel,
                 "privacy": meta.get("privacy") or self.auto_privacy,
                 "account_id": meta.get("account_id") or self.auto_account_id,
                 "add_source_link": add_link,
                 "overlay_applied": ov_applied,
-                "compliance": evaluate_campaign_compliance(title, desc, tags, add_link, ov_applied),
+                "compliance": evaluate_campaign_compliance(title, desc, tags, add_link, ov_applied, camp_rules),
                 "youtube": meta.get("youtube"),
                 "tiktok": meta.get("tiktok"),
                 "instagram": meta.get("instagram"),
@@ -819,6 +884,7 @@ class WatcherController:
             "channel": self.channel,
             "stream_url": self.stream_url,
             "campaign_mode": self.campaign_mode,
+            "campaign": self.active_campaign(),
             "overlay": self.overlay_status(),
             "is_live": bool(rec and rec.is_live),
             "uptime_seconds": max(0, uptime),

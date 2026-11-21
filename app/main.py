@@ -25,9 +25,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 from starlette.background import BackgroundTask
 
-from . import config, render, selector, socials, source, trim, watcher, youtube
+from . import campaigns, config, render, selector, socials, source, trim, watcher, youtube
 
-app = FastAPI(title="Clipsmith")
+app = FastAPI(title="clipper.io")
 
 
 _LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"} | {
@@ -513,7 +513,7 @@ def youtube_connect(request: Request, next: str = "/") -> RedirectResponse:
         url = youtube.start_auth(redirect)
     except youtube.NotConfigured as exc:
         raise HTTPException(400, str(exc)) from None
-    if next in ("/", "/watcher", "/posts"):
+    if next in ("/", "/watcher", "/posts", "/campaigns"):
         youtube.set_return_to(url, next)
     return RedirectResponse(url, status_code=307)
 
@@ -904,6 +904,69 @@ def posts_page():
     return FileResponse(config.STATIC_DIR / "posts.html")
 
 
+@app.get("/campaigns")
+def campaigns_page():
+    return FileResponse(config.STATIC_DIR / "campaigns.html")
+
+
+class CampaignSelectRequest(BaseModel):
+    campaign_id: str
+
+
+class CampaignBriefParseRequest(BaseModel):
+    brief: str
+
+
+@app.get("/api/campaigns")
+def get_campaigns_endpoint() -> dict:
+    return campaigns.list_campaigns()
+
+
+@app.post("/api/campaigns")
+def save_campaign_endpoint(payload: dict) -> dict:
+    try:
+        res = campaigns.save_campaign(payload)
+        watcher.controller.campaign_mode = res["active_id"] != "general"
+        return res
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.post("/api/campaigns/select")
+def select_campaign_endpoint(req: CampaignSelectRequest) -> dict:
+    try:
+        res = campaigns.select_campaign(req.campaign_id)
+        watcher.controller.campaign_mode = res["active_id"] != "general"
+        return res
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from None
+
+
+@app.post("/api/campaigns/parse-brief")
+def parse_campaign_brief_endpoint(req: CampaignBriefParseRequest) -> dict:
+    try:
+        return campaigns.parse_rules_brief(req.brief)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.post("/api/campaigns/{campaign_id}/overlay")
+async def upload_campaign_overlay_endpoint(campaign_id: str, file: UploadFile = File(...)) -> dict:
+    content = await file.read(50 * 1024 * 1024)
+    try:
+        return campaigns.save_campaign_overlay(campaign_id, file.filename or "logo_overlay.png", content)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.delete("/api/campaigns/{campaign_id}")
+def delete_campaign_endpoint(campaign_id: str) -> dict:
+    try:
+        return campaigns.delete_campaign(campaign_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
 @app.get("/api/socials/accounts")
 def get_all_social_accounts() -> dict:
     return socials.all_accounts_status()
@@ -1075,6 +1138,9 @@ def list_posts_and_stats(refresh_stats: bool = False) -> dict:
             "tiktok_options": wc.get("tiktok_options") or {},
             "instagram_options": wc.get("instagram_options") or {},
             "compliance": wc.get("compliance"),
+            "campaign_id": wc.get("campaign_id"),
+            "campaign_name": wc.get("campaign_name"),
+            "cliffhanger_text": wc.get("cliffhanger_text"),
             "youtube": yt_info,
             "tiktok": wc.get("tiktok"),
             "instagram": wc.get("instagram"),
@@ -1149,6 +1215,7 @@ def list_posts_and_stats(refresh_stats: bool = False) -> dict:
 
     overall_eng = round(((total_likes + total_comments) / total_views) * 100, 2) if total_views > 0 else 0.0
     return {
+        "campaigns": campaigns.list_campaigns(),
         "socials": socials.all_accounts_status(),
         "loop": dict(_loop_state),
         "auto_post": {

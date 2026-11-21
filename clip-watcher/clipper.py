@@ -57,10 +57,11 @@ def extract_clip(
     vertical_mode: bool = True,
     vertical_layout: str = "blur",
     overlay_path: Path | None = None,
+    use_default_overlay: bool = True,
 ) -> Path:
     """Extract a clip from a video file or list of .ts segments, apply optional logo overlay, and encode to MP4."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    if overlay_path is None:
+    if overlay_path is None and use_default_overlay:
         overlay_path = config.get_overlay_path()
     has_overlay = overlay_path is not None and overlay_path.is_file()
     is_looped_video_overlay = bool(has_overlay and overlay_path.suffix.lower() in (".mov", ".mp4", ".gif"))
@@ -140,6 +141,8 @@ def extract_spike_from_buffer(
     wait_seconds: float = config.POST_SPIKE_WAIT_SECONDS,
     vertical_mode: bool = config.VERTICAL_MODE,
     vertical_layout: str = config.VERTICAL_LAYOUT,
+    overlay_path: Path | None = None,
+    use_default_overlay: bool = True,
 ) -> Path:
     """Wait for post-reaction footage, then cut [T - 15s, T + 15s] from buffered segments."""
     remaining = (spike_ts + wait_seconds) - time.time()
@@ -162,4 +165,6 @@ def extract_spike_from_buffer(
         duration=30.0,
         vertical_mode=vertical_mode,
         vertical_layout=vertical_layout,
+        overlay_path=overlay_path,
+        use_default_overlay=use_default_overlay,
     )

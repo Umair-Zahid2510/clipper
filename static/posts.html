@@ -3,15 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Clipsmith — Multi-Social Publisher, Approval Loop &amp; Live Stats</title>
+<title>clipper.io — Multi-Social Publisher, Approval Loop &amp; Live Stats</title>
 <style>
   :root {
-    --bg: #0d0e12; --panel: #16181f; --panel-2: #1d2029; --line: #2a2e3a;
-    --text: #eef0f5; --muted: #a9b0c0; --accent: #ffd60a; --accent-ink: #1a1500;
-    --good: #4ade80; --mid: #fbbf24; --bad: #ff8a8a; --ring: #7cc4ff;
-    --yt: #ff3b30; --tt: #00f2fe; --ig: #e1306c;
-    --f-body: "Segoe UI", system-ui, -apple-system, sans-serif;
-    --f-mono: ui-monospace, Consolas, monospace;
+    --bg: #050505; --panel: #0e0e0e; --panel-2: #171717; --line: #262626;
+    --text: #fafafa; --muted: #a1a1aa; --accent: #ffffff; --accent-ink: #050505;
+    --good: #e4e4e7; --mid: #d4d4d8; --bad: #f87171; --ring: #ffffff;
+    --yt: #ffffff; --tt: #ffffff; --ig: #ffffff;
+    --f-body: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+    --f-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
     color-scheme: dark;
   }
   * { box-sizing: border-box; }
@@ -172,10 +172,11 @@
 <body>
 <div class="wrap">
   <header>
-    <div class="brand"><i aria-hidden="true"></i>Clipsmith</div>
+    <div class="brand"><i aria-hidden="true"></i>clipper.io</div>
     <nav class="nav" aria-label="Mode">
       <a href="/">Video to Shorts</a>
       <a href="/watcher"><span class="dot" id="watchDot" hidden aria-hidden="true"></span>Live Stream</a>
+      <a href="/campaigns">Campaigns &amp; Rules</a>
       <a href="/posts" aria-current="page">Posts &amp; Socials</a>
     </nav>
     <div class="hdr-right" id="socialHeaderBadges">
@@ -776,7 +777,9 @@ function renderList() {
         <div class="item-top">
           <div class="pills">
             <span class="pill ${it.source === "job" ? "src-job" : "src-watcher"}">${esc(it.source_label)}</span>
+            ${it.campaign_name ? `<span class="pill">${esc(it.campaign_name)}</span>` : ""}
             <span class="pill">${esc(it.name)}</span>
+            ${it.cliffhanger_text ? `<span class="pill" title="White-Box Cliffhanger Hook Banner" style="background:#fff;color:#000;border-color:#fff;font-weight:700">HOOK: ${esc(it.cliffhanger_text.slice(0, 38))}</span>` : ""}
             ${compBadge}
             ${it.queue_position ? `<span class="pill q-badge">Loop Queue #${it.queue_position}</span>` : ""}
             ${platBadgeHtml(it, "youtube", "YT")}

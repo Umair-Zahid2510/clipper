@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Clipsmith — Live Stream Watcher (YouTube &amp; Twitch)</title>
+<title>clipper.io — Live Stream Clipper (YouTube &amp; Twitch)</title>
 <style>
   :root {
-    --bg: #0d0e12; --panel: #16181f; --panel-2: #1d2029; --line: #2a2e3a;
-    --text: #eef0f5; --muted: #a9b0c0; --accent: #ffd60a; --accent-ink: #1a1500;
-    --good: #4ade80; --mid: #fbbf24; --bad: #ff8a8a; --ring: #7cc4ff;
-    --f-body: "Segoe UI", system-ui, -apple-system, sans-serif;
-    --f-mono: ui-monospace, Consolas, monospace;
+    --bg: #050505; --panel: #0e0e0e; --panel-2: #171717; --line: #262626;
+    --text: #fafafa; --muted: #a1a1aa; --accent: #ffffff; --accent-ink: #050505;
+    --good: #e4e4e7; --mid: #d4d4d8; --bad: #f87171; --ring: #ffffff;
+    --f-body: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+    --f-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
     color-scheme: dark;
   }
   * { box-sizing: border-box; }
@@ -156,13 +156,15 @@
 <body>
 <div class="wrap">
   <header>
-    <div class="brand"><i aria-hidden="true"></i>Clipsmith</div>
+    <div class="brand"><i aria-hidden="true"></i>clipper.io</div>
     <nav class="nav" aria-label="Mode">
       <a href="/">Video to Shorts</a>
       <a href="/watcher" aria-current="page">Live Stream</a>
-      <a href="/posts">Posts &amp; Stats</a>
+      <a href="/campaigns">Campaigns &amp; Rules</a>
+      <a href="/posts">Posts &amp; Socials</a>
     </nav>
     <div class="hdr-right">
+      <a href="/campaigns" class="mode" id="activeCampBadge" style="text-decoration:none;cursor:pointer">Campaign: <b>KreekCraft GTA 6</b></a>
       <span id="yt" class="hdr-right"></span>
       <div class="mode" id="badge" role="status"><span class="dot" aria-hidden="true"></span><span>Idle</span></div>
     </div>
@@ -170,8 +172,8 @@
 
   <main>
     <div class="hero">
-      <h1>KreekCraft GTA 6 <em>Live Stream Clipper</em></h1>
-      <p>Works with <b>YouTube Live</b> and <b>Twitch Live</b>. Automatically applies the mandatory KreekCraft logo overlay, burns in subtitles, and formats captions with <code>Watch KreekCraft on YouTube and Twitch</code> + <code>#GTA6 #KreekCraft #GrandTheftAutoVI</code> (no links).</p>
+      <h1>Autonomous <em>Live Stream Clipper</em></h1>
+      <p>Monitors <b>YouTube Live</b> and <b>Twitch Live</b> streams in real time, catches up missed stream hours in parallel, burns in white-box <b>cliffhanger hooks</b> + subtitles, and formats every clip according to your active <a href="/campaigns">Campaign or General Rules</a>.</p>
     </div>
 
     <div id="ytmsg" role="status"></div>
@@ -553,6 +555,9 @@ function renderClips(clips) {
 
 let lastOverlaySig = "";
 function renderState(st) {
+  if (st.campaign && $("#activeCampBadge")) {
+    $("#activeCampBadge").innerHTML = `Mode: <b>${esc(st.campaign.name)}</b>`;
+  }
   const ovSig = JSON.stringify(st.overlay || null);
   if (ovSig !== lastOverlaySig) {
     lastOverlaySig = ovSig;

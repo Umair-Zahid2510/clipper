@@ -377,3 +377,58 @@ def test_multi_social_tokens_platform_payloads_approval_and_sequential_loop(monk
     assert item3["instagram"]["status"] == "done"
 
 
+def test_campaigns_studio_brief_parser_general_mode_and_cliffhanger_hook(monkeypatch, tmp_path):
+    from app import campaigns
+
+    monkeypatch.setattr(campaigns, "CAMPAIGNS_PATH", tmp_path / "campaigns.json")
+    client = TestClient(main.app)
+
+    # 1. Parse a raw rules brief
+    brief_text = """
+    Speed GTA 6 Clipping: Full Rules Brief
+    CPM: $2.5 per 1,000 views
+    Max Payout: $500 per clip
+    Engagement Requirement: Every clip must maintain at least a 1.2% engagement rate.
+    Caption Requirement: Include "Watch IShowSpeed Live on YouTube" in every caption. Do not include links or URLs in the caption.
+    Hashtag Requirement: Every clip must include #IShowSpeed #GTA6 #SpeedLive.
+    THE OFFICIAL LOGO OVERLAY MUST APPEAR THROUGHOUT THE ENTIRE VIDEO.
+    """
+    parsed_res = client.post("/api/campaigns/parse-brief", json={"brief": brief_text})
+    assert parsed_res.status_code == 200
+    parsed = parsed_res.json()
+    assert parsed["cpm_usd"] == 2.5
+    assert parsed["max_payout_usd"] == 500.0
+    assert parsed["min_engagement_pct"] == 1.2
+    assert "Watch IShowSpeed Live on YouTube" in parsed["required_cta"]
+    assert set(parsed["required_hashtags"]) >= {"IShowSpeed", "GTA6", "SpeedLive"}
+    assert parsed["no_links"] is True
+    assert parsed["require_overlay"] is True
+
+    # 2. Save & activate the new campaign profile
+    save_res = client.post("/api/campaigns", json=parsed)
+    assert save_res.status_code == 200
+    active = save_res.json()["active"]
+    assert active["name"] == "Speed GTA 6 Clipping"
+
+    # 3. Verify cliffhanger ASS script generation includes CliffBox style & Dialogue event
+    srt = tmp_path / "sample.srt"
+    srt.write_text("1\n00:00:00,200 --> 00:00:02,000\nNO WAY HE JUMPED THE HELICOPTER!\n", encoding="utf-8")
+    meta = watcher.captioner.build_default_metadata(srt, channel="ishowspeed", campaign_mode=True, campaign_rules=active)
+    assert "Watch IShowSpeed Live on YouTube" in meta["description"]
+    assert "WAIT FOR" in meta["cliffhanger_text"]
+    ass_text = watcher.captioner._build_cliffhanger_and_captions_ass(srt, meta["cliffhanger_text"], 4.0)
+    assert "Style: CliffBox,Arial Black,50,&H000A0A0A,&H000A0A0A,&H00FFFFFF,&H00FFFFFF" in ass_text
+    assert "Dialogue: 2,0:00:00.00,0:00:04.00,CliffBox" in ass_text
+
+    # 4. Switch to General Mode (non-campaign) and verify clips use standard editing without forced CTA/no-links
+    gen_res = client.post("/api/campaigns/select", json={"campaign_id": "general"})
+    assert gen_res.status_code == 200
+    gen_active = gen_res.json()["active"]
+    assert gen_active["id"] == "general"
+    gen_meta = watcher.captioner.build_default_metadata(srt, channel="ishowspeed", campaign_mode=False, campaign_rules=gen_active)
+    assert gen_meta["campaign_mode"] is False
+    assert gen_meta["overlay_applied"] is False
+    assert "Watch IShowSpeed Live on YouTube" not in gen_meta["description"]
+
+
+
