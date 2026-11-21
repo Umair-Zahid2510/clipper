@@ -841,6 +841,11 @@ class WatcherController:
     def list_clips(self) -> list[dict]:
         clips = []
         active_camp = self.active_campaign()
+        try:
+            from . import socials
+            conn_plats = [p for p, info in socials.all_accounts_status().items() if info.get("connected")] or ["youtube"]
+        except Exception:
+            conn_plats = ["youtube"]
         files = [p for p in cw_config.OUTPUT_DIR.glob("*.mp4") if not p.name.startswith(".tmp_")]
         for p in sorted(files, key=lambda x: x.stat().st_mtime, reverse=True):
             st = p.stat()
@@ -882,7 +887,7 @@ class WatcherController:
                 "instagram": meta.get("instagram"),
                 "tiktok_options": meta.get("tiktok_options") or {},
                 "instagram_options": meta.get("instagram_options") or {},
-                "target_platforms": meta.get("target_platforms") or ["youtube"],
+                "target_platforms": meta.get("target_platforms") or conn_plats,
                 "approval_status": meta.get("approval_status") or "pending",
                 "made_for_kids": bool(meta.get("made_for_kids", False)),
                 "notify_subscribers": bool(meta.get("notify_subscribers", True)),

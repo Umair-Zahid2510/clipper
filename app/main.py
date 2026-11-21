@@ -1271,7 +1271,7 @@ def list_posts_and_stats(refresh_stats: bool = False) -> dict:
         ig = it.get("instagram") or {}
         statuses = [s.get("status") for s in (y, tt, ig) if isinstance(s, dict) and s.get("status")]
 
-        t_plats = it.get("target_platforms") or ["youtube"]
+        t_plats = list(dict.fromkeys((it.get("target_platforms") or ["youtube"]) + list(_loop_state.get("platforms") or [])))
         all_targets_done = all(((it.get(p) or {}).get("status") == "done") for p in t_plats)
         needs_post = any(
             ((it.get(p) or {}).get("status") not in ("done", "queued", "uploading"))
@@ -1592,6 +1592,7 @@ def _classify_upload_error(err_msg: str) -> str:
 def _sequential_loop_worker() -> None:
     """Background worker that posts approved clips one by one in sequence across target socials
     with graceful error classification, automatic exponential backoff retry, and account rotation."""
+    exhausted_yt_accounts: set[str] = set()
     while True:
         with _loop_lock:
             if not _loop_state["running"]:
@@ -1615,8 +1616,9 @@ def _sequential_loop_worker() -> None:
         for it in snap["items"]:
             if it.get("approval_status") != "approved":
                 continue
-            c_plats = _normalize_target_platforms(it.get("target_platforms") or loop_plats)
-            active_plats = [p for p in loop_plats if p in c_plats] or loop_plats
+            # Always include all platforms checked in 'Loop Target Socials' (`loop_plats`)
+            active_plats = list(dict.fromkeys(loop_plats + _normalize_target_platforms(it.get("target_platforms"))))
+            active_plats = [p for p in active_plats if p in loop_plats]
             pending_plats = []
             for p in active_plats:
                 if not acc_status.get(p, {}).get("connected"):
@@ -1678,12 +1680,14 @@ def _sequential_loop_worker() -> None:
                 err_kind = _classify_upload_error(err_msg)
                 attempts = prev_attempts + 1
 
-                # If YouTube hit daily quota and another YouTube channel is linked, rotate to it automatically!
+                # If YouTube hit daily quota and another YouTube channel is linked that hasn't exhausted quota yet, rotate to it once!
                 rotated_to = None
                 if err_kind == "quota" and p == "youtube":
                     yt_accs = (acc_status.get("youtube") or {}).get("accounts") or []
                     cur_id = (acc_status.get("youtube") or {}).get("active_id")
-                    alt = next((a for a in yt_accs if a.get("id") != cur_id), None)
+                    if cur_id:
+                        exhausted_yt_accounts.add(cur_id)
+                    alt = next((a for a in yt_accs if a.get("id") and a.get("id") not in exhausted_yt_accounts), None)
                     if alt:
                         try:
                             youtube.select_account(alt["id"])
@@ -1708,6 +1712,15 @@ def _sequential_loop_worker() -> None:
                 _set_clip_field_by_key(candidate["key"], **{p: enriched_err})
 
                 if err_kind in ("quota", "auth"):
+                    if p == "youtube" and err_kind == "quota":
+                        # All connected YouTube channels have exhausted today's upload quota; disable YouTube for the rest of this loop run if another platform is active
+                        other_connected = [x for x in loop_plats if x != p and acc_status.get(x, {}).get("connected")]
+                        if other_connected:
+                            with _loop_lock:
+                                _loop_state["platforms"] = other_connected
+                            loop_plats = other_connected
+                            _log_loop_event("warn", f"All YouTube channels reached daily quota — continuing sequential loop on {', '.join(x.upper() for x in other_connected)}.", candidate["key"], p)
+                            continue
                     # Check if any other selected platform in loop_plats is still connected and usable
                     other_connected = [x for x in loop_plats if x != p and acc_status.get(x, {}).get("connected")]
                     if not other_connected:
@@ -1764,17 +1777,20 @@ def configure_sequential_loop(req: SequentialLoopRequest) -> dict:
             labels = ", ".join({"youtube": "YouTube Shorts", "tiktok": "TikTok", "instagram": "Instagram Reels"}[p] for p in plats)
             raise HTTPException(409, f"Connect at least one selected platform ({labels}) in Social Accounts & Tokens Setup before starting the sequential loop.")
 
-        # On start/resume, automatically reset retryable error states on approved clips so they gracefully resume
+        # Sync target_platforms on all approved clips to include the selected loop platforms
+        # and reset retryable error states so they gracefully resume
         snap = list_posts_and_stats(refresh_stats=False)
         resumed_errors = 0
         for it in snap["items"]:
-            if it.get("approval_status") != "approved":
-                continue
-            for p in plats:
-                pinfo = it.get(p) or {}
-                if pinfo.get("status") == "error":
-                    _set_clip_field_by_key(it["key"], **{p: None})
-                    resumed_errors += 1
+            merged_plats = list(dict.fromkeys((it.get("target_platforms") or ["youtube"]) + plats))
+            updates: dict = {"target_platforms": merged_plats}
+            if it.get("approval_status") == "approved":
+                for p in plats:
+                    pinfo = it.get(p) or {}
+                    if pinfo.get("status") == "error":
+                        updates[p] = None
+                        resumed_errors += 1
+            _set_clip_field_by_key(it["key"], **updates)
         if resumed_errors:
             _log_loop_event("info", f"Gracefully reset {resumed_errors} previously failed upload(s) to resume from queue.")
 
