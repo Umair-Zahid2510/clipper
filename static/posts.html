@@ -419,13 +419,21 @@
             <select id="loopDelay" style="width:auto;min-height:34px;padding:4px 10px;font-size:13px">
               <option value="0">0s (Immediate sequence)</option>
               <option value="10">10 seconds</option>
-              <option value="15" selected>15 seconds (TikTok safe)</option>
-              <option value="20">20 seconds</option>
+              <option value="15">15 seconds</option>
+              <option value="20" selected>20 seconds (Recommended)</option>
               <option value="30">30 seconds</option>
               <option value="60">1 minute</option>
               <option value="120">2 minutes</option>
               <option value="600">10 minutes</option>
               <option value="1800">30 minutes</option>
+            </select>
+          </label>
+          <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)">
+            Jitter:
+            <select id="loopJitter" style="width:auto;min-height:34px;padding:4px 10px;font-size:13px">
+              <option value="0">0% (Exact)</option>
+              <option value="30" selected>±30% (Anti-block)</option>
+              <option value="50">±50% (Wide)</option>
             </select>
           </label>
           <label style="display:inline-flex;align-items:center;gap:7px;font-size:13px;cursor:pointer">
@@ -768,6 +776,9 @@ function renderSummaryAndLoop(s, loop) {
     if (typeof loop.delay_seconds === "number") {
       $("#loopDelay").value = String(loop.delay_seconds);
     }
+    if (typeof loop.jitter_pct === "number") {
+      $("#loopJitter").value = String(loop.jitter_pct);
+    }
     $("#loopAutoApprove").checked = !!loop.auto_approve_new;
     if (typeof loop.auto_retry_errors === "boolean") {
       $("#loopAutoRetry").checked = loop.auto_retry_errors;
@@ -790,7 +801,8 @@ async function syncLoopSettings(toggleRun = null) {
       body: JSON.stringify({
         running,
         platforms,
-        delay_seconds: Number($("#loopDelay").value || 10),
+        delay_seconds: Number($("#loopDelay").value || 20),
+        jitter_pct: Number($("#loopJitter").value ?? 30),
         auto_approve_new: $("#loopAutoApprove").checked,
         auto_retry_errors: $("#loopAutoRetry").checked,
       }),
@@ -807,6 +819,7 @@ $("#loopToggleBtn").addEventListener("click", () => {
   syncLoopSettings(!currentlyRunning);
 });
 $("#loopDelay").addEventListener("change", () => { if (snapshot.loop?.running) syncLoopSettings(true); });
+$("#loopJitter").addEventListener("change", () => { if (snapshot.loop?.running) syncLoopSettings(true); });
 $("#loopAutoApprove").addEventListener("change", () => syncLoopSettings(!!snapshot.loop?.running));
 $("#loopAutoRetry").addEventListener("change", () => syncLoopSettings(!!snapshot.loop?.running));
 $$(".loop-plat").forEach((cb) => cb.addEventListener("change", () => { if (snapshot.loop?.running) syncLoopSettings(true); }));

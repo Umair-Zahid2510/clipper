@@ -473,8 +473,71 @@ def test_graceful_resume_queue_clear_and_error_classification(monkeypatch, tmp_p
 
     # 4. Verify error classifier
     assert main._classify_upload_error("YouTube refused the upload (429): Quota exceeded") == "quota"
+    assert main._classify_upload_error("TikTok API rejected init (spam_risk_too_many_pending_share)") == "quota"
+    assert main._classify_upload_error("TikTok API rejected init (rate_limit_exceeded)") == "transient"
     assert main._classify_upload_error("401: sign-in has expired") == "auth"
     assert main._classify_upload_error("Connection reset by peer") == "transient"
+
+
+def test_jittered_delay_and_tiktok_inbox_cache(monkeypatch, tmp_path):
+    from app import socials
+
+    assert main._compute_jittered_delay(0, 30) == 0
+    assert main._compute_jittered_delay(20, 0) == 20
+    samples = [main._compute_jittered_delay(20, 30) for _ in range(40)]
+    assert all(14 <= s <= 26 for s in samples)
+
+    # Cached force_inbox_draft skips DIRECT_POST probes and uses only 1 init call
+    monkeypatch.setattr(socials, "SOCIAL_ACCOUNTS_PATH", tmp_path / "social_accounts.json")
+    monkeypatch.setattr(socials, "_last_tt_init_ts", 0.0)
+    monkeypatch.setattr(socials.time, "sleep", lambda *_: None)
+    socials._write_social_store({
+        "youtube": {"active_id": None, "accounts": {}},
+        "tiktok": {
+            "active_id": "tt1",
+            "accounts": {
+                "tt1": {
+                    "id": "tt1",
+                    "title": "@testuser",
+                    "access_token": "tok_123",
+                    "force_inbox_draft": True,
+                    "force_inbox_draft_at": socials.time.time(),
+                }
+            },
+        },
+        "instagram": {"active_id": None, "accounts": {}},
+    })
+
+    mp4 = tmp_path / "clip.mp4"
+    mp4.write_bytes(b"mp4data")
+
+    calls = []
+
+    class FakeResp:
+        def __init__(self, code, payload):
+            self.status_code = code
+            self.content = b"{}"
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    def fake_post(url, **kw):
+        calls.append(url)
+        return FakeResp(200, {"error": {"code": "ok"}, "data": {"publish_id": "pub_1", "upload_url": "https://upload.example/1"}})
+
+    def fake_put(url, **kw):
+        return FakeResp(200, {})
+
+    monkeypatch.setattr(socials.requests, "post", fake_post)
+    monkeypatch.setattr(socials.requests, "put", fake_put)
+
+    res = socials.upload_to_tiktok(mp4, {"post_mode": "DIRECT_POST", "body": {"post_info": {}, "source_info": {}}})
+    assert res["status"] == "done"
+    assert res["post_mode"] == "MEDIA_UPLOAD"
+    assert len(calls) == 1
+    assert calls[0].endswith("/inbox/video/init/")
+
 
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import re
 import threading
 import time
@@ -632,18 +633,24 @@ def upload_to_tiktok(
         "chunk_size": size,
         "total_chunk_count": 1,
     }
+    force_inbox = bool(acc.get("force_inbox_draft")) and (
+        time.time() - float(acc.get("force_inbox_draft_at") or 0) < 86400
+    )
+    posted_mode = "MEDIA_UPLOAD" if (payload.get("post_mode") == "MEDIA_UPLOAD" or force_inbox) else (payload.get("post_mode") or "DIRECT_POST")
     init_url = (
         "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/"
-        if payload.get("post_mode") == "MEDIA_UPLOAD"
+        if posted_mode == "MEDIA_UPLOAD"
         else "https://open.tiktokapis.com/v2/post/publish/video/init/"
     )
+    init_body = {"source_info": body["source_info"]} if posted_mode == "MEDIA_UPLOAD" else body
     if progress:
         progress(10)
 
     def _call_init(url: str, token: str, req_body: dict):
         global _last_tt_init_ts
         with _tt_rate_lock:
-            wait = 15.0 - (time.monotonic() - _last_tt_init_ts)
+            min_gap = 15.0 + random.uniform(2.0, 7.0)
+            wait = min_gap - (time.monotonic() - _last_tt_init_ts)
             if wait > 0:
                 time.sleep(wait)
             r = requests.post(
@@ -659,21 +666,21 @@ def upload_to_tiktok(
         d = r.json() if r.content else {}
         return r, d
 
-    resp, data = _call_init(init_url, acc["access_token"], body)
+    resp, data = _call_init(init_url, acc["access_token"], init_body)
     err = data.get("error") or {}
     err_code = str(err.get("code") or "").lower()
 
     # 1. If 401 / access_token_invalid, automatically refresh token and retry once
     if (resp.status_code == 401 or "token" in err_code) and acc.get("refresh_token"):
         acc = refresh_tiktok_account_token(acc.get("id"))
-        resp, data = _call_init(init_url, acc["access_token"], body)
+        resp, data = _call_init(init_url, acc["access_token"], init_body)
         err = data.get("error") or {}
         err_code = str(err.get("code") or "").lower()
 
     # 2. If TikTok Sandbox / Unaudited app rejects PUBLIC_TO_EVERYONE, try SELF_ONLY, and if the account is public
     # (`unaudited_client_can_only_post_to_private_accounts`), automatically fall back to Inbox Draft (`MEDIA_UPLOAD`)
-    posted_mode = payload.get("post_mode") or "DIRECT_POST"
-    if (resp.status_code >= 400 or (err_code and err_code != "ok")) and ("unaudited" in err_code or "privacy" in err_code or "content-sharing-guidelines" in str(err.get("message", "")).lower()):
+    # and cache `force_inbox_draft` for 24h so subsequent clips take 1 init call instead of 3.
+    if posted_mode != "MEDIA_UPLOAD" and (resp.status_code >= 400 or (err_code and err_code != "ok")) and ("unaudited" in err_code or "privacy" in err_code or "content-sharing-guidelines" in str(err.get("message", "")).lower()):
         if body.get("post_info", {}).get("privacy_level") != "SELF_ONLY":
             body.setdefault("post_info", {})["privacy_level"] = "SELF_ONLY"
             resp, data = _call_init(init_url, acc["access_token"], body)
@@ -686,6 +693,15 @@ def upload_to_tiktok(
             resp, data = _call_init(inbox_url, acc["access_token"], {"source_info": body["source_info"]})
             err = data.get("error") or {}
             err_code = str(err.get("code") or "").lower()
+            try:
+                store = _read_social_store()
+                aid = acc.get("id") or store["tiktok"].get("active_id")
+                if aid and aid in store["tiktok"]["accounts"]:
+                    store["tiktok"]["accounts"][aid]["force_inbox_draft"] = True
+                    store["tiktok"]["accounts"][aid]["force_inbox_draft_at"] = time.time()
+                    _write_social_store(store)
+            except Exception:
+                pass
 
     if resp.status_code >= 400 or (err_code and err_code != "ok"):
         if "spam_risk_too_many_pending_share" in err_code or "pending_share" in err_code:
@@ -695,6 +711,8 @@ def upload_to_tiktok(
                 "Open the TikTok mobile app on this account (Inbox -> System Notifications) to publish or clear pending drafts, then click Resume."
             )
         msg = err.get("message") or data.get("message") or f"HTTP {resp.status_code}"
+        if resp.status_code == 429 or "rate_limit" in err_code:
+            raise RuntimeError(f"TikTok API rejected init (rate_limit_exceeded): {msg}")
         raise RuntimeError(f"TikTok API rejected init ({err_code or resp.status_code}): {msg}")
 
     d = data.get("data") or {}

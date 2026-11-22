@@ -6,6 +6,7 @@ import asyncio
 import atexit
 import json
 import os
+import random
 import re
 import shutil
 import tempfile
@@ -903,7 +904,8 @@ class MultiPublishRequest(BaseModel):
 class SequentialLoopRequest(BaseModel):
     running: bool
     platforms: list[str] = Field(default_factory=lambda: ["youtube"])
-    delay_seconds: int = Field(default=10, ge=0, le=86400)
+    delay_seconds: int = Field(default=20, ge=0, le=86400)
+    jitter_pct: int = Field(default=30, ge=0, le=80)
     auto_approve_new: bool = False
     auto_retry_errors: bool = True
     max_posts: int | None = Field(default=None, ge=1, le=500)
@@ -914,7 +916,8 @@ _loop_lock = threading.Lock()
 _loop_state: dict = {
     "running": False,
     "platforms": ["youtube"],
-    "delay_seconds": 10,
+    "delay_seconds": 20,
+    "jitter_pct": 30,
     "auto_approve_new": False,
     "auto_retry_errors": True,
     "max_posts": None,
@@ -1593,10 +1596,22 @@ def _classify_upload_error(err_msg: str) -> str:
     return "transient"
 
 
+def _compute_jittered_delay(delay_s: int, jitter_pct: int) -> int:
+    """Return a randomized delay within delay_s +/- jitter_pct% (minimum 1s when delay_s > 0)."""
+    if delay_s <= 0:
+        return 0
+    pct = max(0, min(80, int(jitter_pct or 0)))
+    if pct == 0:
+        return delay_s
+    factor = 1.0 + random.uniform(-pct / 100.0, pct / 100.0)
+    return max(1, int(round(delay_s * factor)))
+
+
 def _sequential_loop_worker() -> None:
     """Background worker that posts approved clips one by one in sequence across target socials
-    with graceful error classification, automatic exponential backoff retry, and account rotation."""
+    with graceful error classification, jittered rate-limit cooldowns, and account rotation."""
     exhausted_yt_accounts: set[str] = set()
+    platform_cooldown_until: dict[str, float] = {}
     while True:
         with _loop_lock:
             if not _loop_state["running"]:
@@ -1608,6 +1623,7 @@ def _sequential_loop_worker() -> None:
                 return
             loop_plats = list(_loop_state["platforms"])
             delay_s = int(_loop_state["delay_seconds"])
+            jitter_pct = int(_loop_state.get("jitter_pct", 30))
             auto_retry = bool(_loop_state.get("auto_retry_errors", True))
             max_posts = _loop_state.get("max_posts")
             posted_in_run = int(_loop_state.get("posted_in_run") or 0)
@@ -1653,6 +1669,8 @@ def _sequential_loop_worker() -> None:
             for p in active_plats:
                 if not acc_status.get(p, {}).get("connected"):
                     continue
+                if now < platform_cooldown_until.get(p, 0):
+                    continue
                 pinfo = it.get(p) or {}
                 pst = pinfo.get("status")
                 if pst in ("done", "queued", "uploading"):
@@ -1673,12 +1691,22 @@ def _sequential_loop_worker() -> None:
                 break
 
         if not candidate:
+            active_cooldowns = [
+                v - now for p, v in platform_cooldown_until.items()
+                if p in loop_plats and acc_status.get(p, {}).get("connected") and v > now
+            ]
             with _loop_lock:
                 if not _loop_state["running"]:
                     return
                 _loop_state["current_key"] = None
                 _loop_state["current_title"] = None
                 _loop_state["current_platform"] = None
+                if active_cooldowns:
+                    rem = max(1, int(min(active_cooldowns)))
+                    _loop_state["next_post_at"] = now + rem
+                    _loop_state["status_text"] = f"Cooling down {rem}s (rate-limit jitter) before next attempt..."
+                    time.sleep(1.0)
+                    continue
                 _loop_state["next_post_at"] = None
                 _loop_state["status_text"] = "Monitoring queue — waiting for newly approved or retry-ready clips..."
             time.sleep(2.0)
@@ -1700,6 +1728,7 @@ def _sequential_loop_worker() -> None:
             res = _publish_single_platform_sync(candidate, p)
 
             if res.get("status") == "done":
+                platform_cooldown_until.pop(p, None)
                 with _loop_lock:
                     _loop_state["posted_in_run"] = int(_loop_state.get("posted_in_run", 0)) + 1
                     _loop_state["last_error"] = None
@@ -1730,7 +1759,14 @@ def _sequential_loop_worker() -> None:
                 if rotated_to:
                     continue
 
-                backoff_s = 60 if ("rate limit" in err_msg.lower() or "rate_limit" in err_msg.lower()) else min(60, 5 * (2 ** (attempts - 1)))
+                if "rate limit" in err_msg.lower() or "rate_limit" in err_msg.lower() or "429" in err_msg:
+                    cooldown_s = random.uniform(65.0, 95.0)
+                else:
+                    base_s = min(60, 5 * (2 ** (attempts - 1)))
+                    cooldown_s = base_s * random.uniform(0.75, 1.35)
+                backoff_s = max(1, int(round(cooldown_s)))
+                if err_kind == "transient":
+                    platform_cooldown_until[p] = time.time() + cooldown_s
                 is_tt_pending_share = p == "tiktok" and any(k in err_msg.lower() for k in ("spam_risk_too_many_pending_share", "pending_share", "spam_risk"))
                 if not is_tt_pending_share:
                     enriched_err = {
@@ -1784,9 +1820,10 @@ def _sequential_loop_worker() -> None:
         if paused_due_to_fatal:
             return
 
-        # Pacing delay before the next clip in sequence
-        if delay_s > 0:
-            end_ts = time.time() + delay_s
+        # Pacing delay before the next clip in sequence (with randomized jitter)
+        actual_delay = _compute_jittered_delay(delay_s, jitter_pct)
+        if actual_delay > 0:
+            end_ts = time.time() + actual_delay
             with _loop_lock:
                 _loop_state["current_key"] = None
                 _loop_state["current_platform"] = None
@@ -1796,7 +1833,7 @@ def _sequential_loop_worker() -> None:
                     if not _loop_state["running"]:
                         return
                     rem = max(0, int(end_ts - time.time()))
-                    _loop_state["status_text"] = f"Waiting {rem}s before next approved clip in sequence..."
+                    _loop_state["status_text"] = f"Waiting {rem}s (jittered) before next approved clip in sequence..."
                 time.sleep(1.0)
 
 
@@ -1833,6 +1870,7 @@ def configure_sequential_loop(req: SequentialLoopRequest) -> dict:
         _loop_state["running"] = bool(req.running)
         _loop_state["platforms"] = plats
         _loop_state["delay_seconds"] = int(req.delay_seconds)
+        _loop_state["jitter_pct"] = int(req.jitter_pct)
         _loop_state["auto_approve_new"] = bool(req.auto_approve_new)
         _loop_state["auto_retry_errors"] = bool(req.auto_retry_errors)
         _loop_state["max_posts"] = req.max_posts
@@ -1851,7 +1889,7 @@ def configure_sequential_loop(req: SequentialLoopRequest) -> dict:
             _loop_state["status_text"] = "Stopped"
         res_state = dict(_loop_state)
     if req.running and not was_running:
-        _log_loop_event("info", f"Sequential loop started for {', '.join(p.upper() for p in plats)} (delay {req.delay_seconds}s).")
+        _log_loop_event("info", f"Sequential loop started for {', '.join(p.upper() for p in plats)} (delay {req.delay_seconds}s ±{req.jitter_pct}% jitter).")
     elif not req.running and was_running:
         _log_loop_event("info", "Sequential loop paused by user.")
     return res_state
