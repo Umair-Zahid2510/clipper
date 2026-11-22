@@ -562,6 +562,10 @@ def test_learning_context_and_word_pop_ass(monkeypatch, tmp_path):
     ass = render.build_ass([source.Word("WOW", 0.0, 0.4), source.Word("WHAT", 0.4, 0.8)], 0.0, 1.0, "yellow", "WAIT FOR IT")
     assert "\\fscx114\\fscy114\\t(0,80,\\fscx100\\fscy100)" in ass
 
+    import captioner
+    hook_txt = captioner.derive_cliffhanger_text("He stole the police car right there!", "WAIT FOR THE END... 😱")
+    assert "😱" not in hook_txt and len(hook_txt) <= 44
+
 
 
 

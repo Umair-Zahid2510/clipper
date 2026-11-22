@@ -137,22 +137,25 @@ def _esc_ass(text: str) -> str:
 
 
 def derive_cliffhanger_text(transcript: str, custom_template: str | None = None, streamer: str | None = None) -> str:
-    """Create a punchy white-box cliffhanger hook banner from the transcript or custom template."""
-    tmpl = (custom_template or "").strip()
+    """Create a short, clean white-box hook banner (no emojis that render as broken boxes in libass)."""
+    def _clean_hook(s: str) -> str:
+        # Strip emojis/non-ASCII symbols that render as tofu boxes in Arial Black / libass
+        s = re.sub(r"[^\x20-\x7E]", "", s or "")
+        return " ".join(s.split()).strip(" \"'-—:")
+
+    tmpl = _clean_hook(custom_template or "")
     sentences = [s.strip() for s in re.split(r"(?<=[.?!])\s+", strip_urls(transcript or "")) if s.strip()]
-    first = sentences[0] if sentences else (transcript or "").strip()[:55]
-    if len(first) > 48:
-        first = first[:45].rstrip(" ,;:") + "..."
+    first = _clean_hook(sentences[0] if sentences else (transcript or "").strip())
+    if len(first) > 38:
+        first = first[:35].rsplit(" ", 1)[0].rstrip(" ,;:") + "..."
     if tmpl and "{hook}" in tmpl.lower():
-        return re.sub(r"\{hook\}", first or "WAIT FOR IT...", tmpl, flags=re.I)[:75].upper()
-    if tmpl and first:
-        return f"{tmpl} — \"{first.upper()}\""[:78]
+        return re.sub(r"\{hook\}", first or "WAIT FOR IT...", tmpl, flags=re.I)[:44].upper()
     if tmpl:
-        return tmpl[:75].upper()
-    if first:
-        return f"WAIT FOR IT: \"{first.upper()}\""[:78]
-    tag = (streamer or "THIS STREAM").upper()
-    return f"WAIT UNTIL YOU SEE WHAT HAPPENED ON {tag}..."[:75]
+        return tmpl[:42].upper()
+    if first and len(first.split()) >= 2:
+        return first[:42].upper()
+    tag = _clean_hook(streamer or "THIS STREAM").upper()
+    return f"WAIT FOR IT ({tag})"[:42]
 
 
 def build_default_metadata(
@@ -280,7 +283,7 @@ ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Cap,Arial Black,68,{cap_color},{cap_color},&H00000000,&H96000000,-1,0,0,0,100,100,0,0,1,5,2,2,70,70,340,1
-Style: CliffBox,Arial Black,48,&H000A0A0A,&H000A0A0A,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,22,0,8,75,75,310,1
+Style: CliffBox,Arial Black,44,&H000A0A0A,&H000A0A0A,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,14,0,8,90,90,210,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

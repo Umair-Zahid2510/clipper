@@ -40,7 +40,7 @@ DEFAULT_KREEKCRAFT_CAMPAIGN = {
     "require_overlay": True,
     "overlay_filename": "logo_overlay.webp",
     "cliffhanger_enabled": True,
-    "cliffhanger_template": "WAIT FOR IT... 😱",
+    "cliffhanger_template": "WAIT FOR IT...",
     "cliffhanger_duration": 4.0,
     "cpm_usd": 1.0,
     "max_payout_usd": 300.0,
@@ -328,7 +328,7 @@ def parse_rules_brief(text: str) -> dict:
         "max_payout_usd": max_pay,
         "min_engagement_pct": eng,
         "cliffhanger_enabled": True,
-        "cliffhanger_template": "WAIT FOR THE END... 😱",
+        "cliffhanger_template": "WAIT FOR THE END...",
         "cliffhanger_duration": 4.0,
         "notes": f"Parsed from brief ({len(raw)} chars).",
     }

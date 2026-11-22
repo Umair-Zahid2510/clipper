@@ -2,6 +2,7 @@
 reframe to 9:16 around the speaker, burn in animated captions, encode."""
 from __future__ import annotations
 
+import re
 import statistics
 import subprocess
 from pathlib import Path
@@ -250,9 +251,9 @@ def build_ass(
     # Margins are proportional to the frame (they reproduce the 9:16 values exactly);
     # in square/landscape frames the text is a little smaller so lines still fit.
     k = min(w, h) / 1080 * (1.0 if h > w else 0.85)
-    cap_size, hook_size = round(st["size"] * k), round(64 * k)
+    cap_size, hook_size = round(st["size"] * k), round(52 * k)
     cap_lr, cap_v = round(w * 0.065), round(h * 0.245)
-    hook_lr, hook_v = round(w * 0.0834), round(h * 0.12)
+    hook_lr, hook_v = round(w * 0.09), round(h * 0.11)
     if hook_top is not None:
         hook_v = max(0, hook_top - round(hook_size * 0.6))  # straddle the seam, clear of the face
     head = f"""[Script Info]
@@ -265,14 +266,15 @@ ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Cap,{st['font']},{cap_size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,-1,0,0,0,100,100,0,0,1,7,3,2,{cap_lr},{cap_lr},{cap_v},1
-Style: Hook,Arial Black,{hook_size},&H00101010,&H00101010,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,18,0,8,{hook_lr},{hook_lr},{hook_v},1
+Style: Hook,Arial Black,{hook_size},&H00101010,&H00101010,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,14,0,8,{hook_lr},{hook_lr},{hook_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     lines: list[str] = []
     if hook:
-        text = _esc(hook.upper())
+        clean_hook = re.sub(r"[^\x20-\x7E]", "", hook).strip().upper()[:44]
+        text = _esc(clean_hook)
         lines.append(
             f"Dialogue: 1,{_ass_time(0)},{_ass_time(min(3.5, clip_len))},Hook,,0,0,0,,"
             f"{{\\fad(120,250)}}{text}"
@@ -374,11 +376,11 @@ def render_clip(
         cap_words, cap_start = trim.remap_words(clip_words, start, keep), 0.0
     else:
         out_len, cap_words, cap_start = clip_len, clip_words, start
-    # Automatically generate a cliffhanger white-box hook banner from the first spoken words if hook is None/empty
+    # Automatically generate a short, clean hook banner from the first spoken words if hook is None/empty
     if hook is None and clip_words:
-        first_txt = " ".join(w.text for w in clip_words[:8]).strip()
+        first_txt = " ".join(w.text for w in clip_words[:7]).strip()
         if first_txt:
-            hook = f"WAIT FOR IT: \"{first_txt[:42].upper()}...\""
+            hook = first_txt[:38].upper()
 
     (out_dir / ass_name).write_text(
         build_ass(cap_words, cap_start, out_len, style, hook, size=(W, H), hook_top=split["top_h"] if split else None),
