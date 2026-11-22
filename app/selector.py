@@ -66,8 +66,8 @@ class _Pick(BaseModel):
     hook: str = Field(description="3-6 word on-screen hook shown for the first seconds")
     score: int = Field(description="Viral potential from 0 to 100")
     reason: str = Field(description="One sentence on why this moment works as a short")
-    description: str = Field(description="Post caption, 1-2 sentences")
-    hashtags: list[str] = Field(description="3-5 hashtags without the # sign")
+    description: str = Field(description="Human-like 1-2 sentence conversational reaction + engagement question (never truncated transcript)")
+    hashtags: list[str] = Field(description="3-5 working hashtags (1-2 broad discovery + 1-2 niche/topic) without #")
 
 
 class _Picks(BaseModel):
@@ -83,6 +83,39 @@ A clip earns views when a viewer who has seen nothing else understands and cares
 - end on a complete thought, not mid-sentence
 
 Skip intros, sponsor reads, housekeeping, and rambling stretches. Prefer distinct moments over several clips covering the same point. Score honestly: 90+ is rare and means a genuinely gripping standalone moment; an average usable clip is 60-75."""
+
+
+def _build_learning_context(max_top: int = 5, max_bottom: int = 3) -> str:
+    """Summarize top/bottom performing posted clips from saved job stats for closed-loop AI learning."""
+    import json
+    scored: list[tuple[float, int, str, list[str]]] = []
+    if not config.JOBS_DIR.is_dir():
+        return ""
+    for jf in config.JOBS_DIR.glob("*/job.json"):
+        try:
+            job = json.loads(jf.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for c in job.get("clips") or []:
+            st = c.get("live_stats") or {}
+            views = int(st.get("views") or 0)
+            likes = int(st.get("likes") or 0)
+            comments = int(st.get("comments") or 0)
+            if views <= 0 and likes <= 0 and comments <= 0:
+                continue
+            eng = ((likes + comments) / max(1, views)) * 100.0
+            scored.append((views + eng * 10.0, views, (c.get("title") or "").strip(), (c.get("hashtags") or [])[:5]))
+    if not scored:
+        return ""
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top = [f"- \"{t}\" ({v} views, tags: {', '.join(h)})" for _, v, t, h in scored[:max_top] if t]
+    low = [f"- \"{t}\" ({v} views)" for _, v, t, _ in scored[-max_bottom:] if t and len(scored) > max_top]
+    out = ["\n\nChannel performance history (learn what hooks/topics/hashtags resonate):"]
+    if top:
+        out.append("Top performers:\n" + "\n".join(top))
+    if low:
+        out.append("Lower performers (avoid weak framing):\n" + "\n".join(low))
+    return "\n".join(out)
 
 
 def _prompt(
@@ -109,7 +142,9 @@ def _prompt(
         f"Pick the {count} best moments for Shorts. Each clip must run between {min_len} and {max_len} seconds, "
         f"measured from the start time of start_line to the end time of end_line, and be a contiguous run of lines. "
         f"Clips must not overlap. Return them best first. Write title, hook, description and hashtags in the "
-        f"same language as the transcript."
+        f"same language as the transcript. For description, write a natural 1-2 sentence human reaction plus a short "
+        f"question for comments (never raw truncated speech). Mix 1-2 broad discovery tags with 1-2 niche tags."
+        f"{_build_learning_context()}"
         f"{request}"
     )
 

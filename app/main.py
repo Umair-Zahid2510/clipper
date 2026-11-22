@@ -908,6 +908,7 @@ class SequentialLoopRequest(BaseModel):
     jitter_pct: int = Field(default=30, ge=0, le=80)
     auto_approve_new: bool = False
     auto_retry_errors: bool = True
+    auto_wait_quota: bool = False
     max_posts: int | None = Field(default=None, ge=1, le=500)
     best_first: bool = False
 
@@ -920,6 +921,7 @@ _loop_state: dict = {
     "jitter_pct": 30,
     "auto_approve_new": False,
     "auto_retry_errors": True,
+    "auto_wait_quota": False,
     "max_posts": None,
     "best_first": False,
     "current_key": None,
@@ -1625,6 +1627,7 @@ def _sequential_loop_worker() -> None:
             delay_s = int(_loop_state["delay_seconds"])
             jitter_pct = int(_loop_state.get("jitter_pct", 30))
             auto_retry = bool(_loop_state.get("auto_retry_errors", True))
+            auto_wait_quota = bool(_loop_state.get("auto_wait_quota", False))
             max_posts = _loop_state.get("max_posts")
             posted_in_run = int(_loop_state.get("posted_in_run") or 0)
             best_first = bool(_loop_state.get("best_first", False))
@@ -1793,6 +1796,12 @@ def _sequential_loop_worker() -> None:
                             continue
                     # Check if any other selected platform in loop_plats is still connected and usable
                     other_connected = [x for x in loop_plats if x != p and acc_status.get(x, {}).get("connected")]
+                    if auto_wait_quota and err_kind == "quota" and not is_tt_pending_share:
+                        wait_s = random.uniform(3600.0, 5400.0)
+                        platform_cooldown_until[p] = time.time() + wait_s
+                        _set_clip_field_by_key(candidate["key"], **{p: None})
+                        _log_loop_event("warn", f"{p.upper()} quota hit — drip auto-sleep scheduled for ~{int(wait_s // 60)}m.", candidate["key"], p)
+                        continue
                     if is_tt_pending_share or not other_connected:
                         with _loop_lock:
                             _loop_state["running"] = False
@@ -1873,6 +1882,7 @@ def configure_sequential_loop(req: SequentialLoopRequest) -> dict:
         _loop_state["jitter_pct"] = int(req.jitter_pct)
         _loop_state["auto_approve_new"] = bool(req.auto_approve_new)
         _loop_state["auto_retry_errors"] = bool(req.auto_retry_errors)
+        _loop_state["auto_wait_quota"] = bool(req.auto_wait_quota)
         _loop_state["max_posts"] = req.max_posts
         _loop_state["best_first"] = bool(req.best_first)
         if req.running and not was_running:

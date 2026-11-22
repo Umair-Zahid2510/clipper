@@ -349,16 +349,19 @@ class WatcherController:
         provider = app_config.ai_provider()
         if provider and transcript:
             sys_prompt = (
-                "You write accurate, high-retention short-form titles and captions for KreekCraft's official GTA 6 streams. "
+                "You write accurate, high-retention short-form titles and human-sounding captions for KreekCraft's official GTA 6 streams. "
                 "STRICT RULES:\n"
                 "1. Never fabricate context or use misleading clickbait; stay 100% true to the transcript.\n"
-                "2. Include 'Watch KreekCraft on YouTube and Twitch! 🔴' in the description.\n"
+                "2. Write description as a natural 1-2 sentence human reaction + soft engagement question (never raw truncated speech), and include 'Watch KreekCraft on YouTube and Twitch! 🔴'.\n"
                 "3. Do NOT include any links or URLs anywhere.\n"
-                "4. Always include hashtags: GTA6, KreekCraft, GrandTheftAutoVI."
+                "4. Always include GTA6, KreekCraft, GrandTheftAutoVI plus 1-2 relevant broad discovery tags (e.g. shorts, gaming)."
             )
+            from . import selector as _sel
+            learn_ctx = _sel._build_learning_context()
             user_prompt = (
                 f"Streamer: KreekCraft (GTA 6 livestream)\n"
-                f"Spoken transcript:\n{transcript}\n\n"
+                f"Spoken transcript:\n{transcript}"
+                f"{learn_ctx}\n\n"
                 "Return JSON matching the schema."
             )
             try:

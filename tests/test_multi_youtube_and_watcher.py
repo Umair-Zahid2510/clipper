@@ -539,6 +539,30 @@ def test_jittered_delay_and_tiktok_inbox_cache(monkeypatch, tmp_path):
     assert calls[0].endswith("/inbox/video/init/")
 
 
+def test_learning_context_and_word_pop_ass(monkeypatch, tmp_path):
+    import json
+    from app import config, render, selector, source
+
+    monkeypatch.setattr(config, "JOBS_DIR", tmp_path / "jobs")
+    assert selector._build_learning_context() == ""
+
+    jdir = tmp_path / "jobs" / "job1"
+    jdir.mkdir(parents=True)
+    (jdir / "job.json").write_text(json.dumps({
+        "clips": [
+            {"title": "Police Chase Fail", "hashtags": ["GTA6", "shorts"], "live_stats": {"views": 5200, "likes": 310, "comments": 25}},
+            {"title": "Slow Menu Clip", "hashtags": ["gaming"], "live_stats": {"views": 18, "likes": 0, "comments": 0}},
+        ]
+    }), encoding="utf-8")
+
+    ctx = selector._build_learning_context()
+    assert "Police Chase Fail" in ctx
+    assert "5200 views" in ctx
+
+    ass = render.build_ass([source.Word("WOW", 0.0, 0.4), source.Word("WHAT", 0.4, 0.8)], 0.0, 1.0, "yellow", "WAIT FOR IT")
+    assert "\\fscx114\\fscy114\\t(0,80,\\fscx100\\fscy100)" in ass
+
+
 
 
 

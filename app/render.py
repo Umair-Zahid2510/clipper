@@ -289,7 +289,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             for j, x in enumerate(group):
                 tok = _esc(x.text.upper() if st["upper"] else x.text)
                 if j == i:
-                    parts.append(f"{{\\c{st['active']}\\fscx108\\fscy108}}{tok}{{\\c&HFFFFFF&\\fscx100\\fscy100}}")
+                    parts.append(f"{{\\c{st['active']}\\fscx114\\fscy114\\t(0,80,\\fscx100\\fscy100)}}{tok}{{\\c&HFFFFFF&\\fscx100\\fscy100}}")
                 else:
                     parts.append(tok)
             pop = "{\\fscx86\\fscy86\\t(0,90,\\fscx100\\fscy100)}" if i == 0 else ""
@@ -410,7 +410,9 @@ def render_clip(
             f"[bg][fg]overlay=(W-w)/2:(H-h)/2,ass={ass_name}[v]"
         )
 
+    audio_tracks = _audio_tracks(video)
     audio_maps = ["0:a?"]
+    af_args: list[str] = []
     if keep:
         # Cut after reframing (the crop's camera path uses the original clip time)
         # and before the captions (which are already re-timed). fps=30 first gives
@@ -420,10 +422,11 @@ def render_clip(
                               f",fps=30,select='{expr}',setpts=N/30/TB,ass={ass_name}[v]")
         # Trim every audio track: "[0:a]" alone would pick only the first one,
         # while the untrimmed path keeps them all.
-        tracks = _audio_tracks(video)
-        for i in range(tracks):
-            graph += f";[0:a:{i}]aselect='{expr}',asetpts=N/SR/TB[a{i}]"
-        audio_maps = [f"[a{i}]" for i in range(tracks)]
+        for i in range(audio_tracks):
+            graph += f";[0:a:{i}]aselect='{expr}',asetpts=N/SR/TB,loudnorm=I=-14:TP=-1.5:LRA=11[a{i}]"
+        audio_maps = [f"[a{i}]" for i in range(audio_tracks)]
+    elif audio_tracks > 0:
+        af_args = ["-af", "loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=in:st=0:d=0.12"]
 
     has_ov = overlay_path is not None and overlay_path.is_file()
     if has_ov:
@@ -450,7 +453,7 @@ def render_clip(
         "ffmpeg", "-y", "-loglevel", "error",
         "-ss", f"{start:.3f}", "-t", f"{clip_len:.3f}", "-i", str(video),
         *ov_inputs,
-        "-filter_complex", graph, "-map", "[v]", *[x for m in audio_maps for x in ("-map", m)],
+        "-filter_complex", graph, "-map", "[v]", *[x for m in audio_maps for x in ("-map", m)], *af_args,
         "-r", "30", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", f"{name}.mp4",
     ]
