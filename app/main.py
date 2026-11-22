@@ -906,6 +906,8 @@ class SequentialLoopRequest(BaseModel):
     delay_seconds: int = Field(default=10, ge=0, le=86400)
     auto_approve_new: bool = False
     auto_retry_errors: bool = True
+    max_posts: int | None = Field(default=None, ge=1, le=500)
+    best_first: bool = False
 
 
 _loop_lock = threading.Lock()
@@ -915,6 +917,8 @@ _loop_state: dict = {
     "delay_seconds": 10,
     "auto_approve_new": False,
     "auto_retry_errors": True,
+    "max_posts": None,
+    "best_first": False,
     "current_key": None,
     "current_title": None,
     "current_platform": None,
@@ -1605,15 +1609,41 @@ def _sequential_loop_worker() -> None:
             loop_plats = list(_loop_state["platforms"])
             delay_s = int(_loop_state["delay_seconds"])
             auto_retry = bool(_loop_state.get("auto_retry_errors", True))
+            max_posts = _loop_state.get("max_posts")
+            posted_in_run = int(_loop_state.get("posted_in_run") or 0)
+            best_first = bool(_loop_state.get("best_first", False))
+
+        if max_posts is not None and posted_in_run >= int(max_posts):
+            with _loop_lock:
+                _loop_state["running"] = False
+                _loop_state["current_key"] = None
+                _loop_state["current_title"] = None
+                _loop_state["current_platform"] = None
+                _loop_state["next_post_at"] = None
+                _loop_state["status_text"] = f"Completed target of {posted_in_run} clip(s)"
+            _log_loop_event("info", f"Sequential loop finished target of {posted_in_run} clip(s).")
+            return
 
         snap = list_posts_and_stats(refresh_stats=False)
         acc_status = snap.get("socials") or {}
+        items_to_scan = snap["items"]
+        if best_first:
+            items_to_scan = sorted(
+                items_to_scan,
+                key=lambda x: (
+                    bool((x.get("compliance") or {}).get("compliant")),
+                    float(x.get("score") or 0),
+                    len((x.get("transcript") or "").strip()),
+                    float(x.get("size_mb") or 0),
+                ),
+                reverse=True,
+            )
 
         # Find the next approved clip that hasn't completed posting on all target platforms
         candidate = None
         candidate_plats: list[str] = []
         now = time.time()
-        for it in snap["items"]:
+        for it in items_to_scan:
             if it.get("approval_status") != "approved":
                 continue
             # Always include all platforms checked in 'Loop Target Socials' (`loop_plats`)
@@ -1805,6 +1835,8 @@ def configure_sequential_loop(req: SequentialLoopRequest) -> dict:
         _loop_state["delay_seconds"] = int(req.delay_seconds)
         _loop_state["auto_approve_new"] = bool(req.auto_approve_new)
         _loop_state["auto_retry_errors"] = bool(req.auto_retry_errors)
+        _loop_state["max_posts"] = req.max_posts
+        _loop_state["best_first"] = bool(req.best_first)
         if req.running and not was_running:
             _loop_state["posted_in_run"] = 0
             _loop_state["last_error"] = None
