@@ -178,6 +178,7 @@ def build_default_metadata(
             chan = prefix
 
     transcript = strip_urls(extract_srt_transcript(srt_path))
+    stem_low = srt_path.stem.lower()
     sentences = [s.strip() for s in re.split(r"(?<=[.?!])\s+", transcript) if s.strip()]
     hook = sentences[0] if sentences else transcript[:70].strip()
     hook_clean = (hook[:1].upper() + hook[1:].lower()) if (hook and hook.isupper()) else hook
@@ -192,39 +193,80 @@ def build_default_metadata(
         camp_id = rules.get("id") or "kreekcraft-gta6"
         camp_name = rules.get("name") or "KreekCraft GTA 6"
         streamer_label = rules.get("streamer") or "KreekCraft"
+        if "ishowspeed" in stem_low or "speed" in chan or "hwsg39yibg" in stem_low:
+            streamer_label = "IShowSpeed"
+            creator_tag = "ishowspeed"
+        elif chan and chan not in ("yt", "live", "twitch", "youtube"):
+            creator_tag = chan
+        else:
+            creator_tag = streamer_label.lower().replace(" ", "")
+
         cta = (rules.get("required_cta") if "required_cta" in rules else config.CAMPAIGN_CTA) or ""
         tags = list(rules.get("required_hashtags") or config.CAMPAIGN_HASHTAGS)
         no_links = bool(rules.get("no_links", True))
 
-        suffix = camp_name.replace(" Clipping", "")
-        if hook_clean:
-            title = f"{hook_clean} | {suffix}"
+        t_low = (transcript or "").lower()
+        seed = sum(ord(ch) for ch in srt_path.stem)
+        if any(k in t_low for k in ("cop", "cops", "police", "helicopter", "arrest", "jail")):
+            pair = (
+                f"{streamer_label} couldn't escape the cops in GTA 6",
+                f"{streamer_label} tried everything to get away right here 😭\n\nWait until you see how this ended 👇",
+            )
+        elif any(k in t_low for k in ("car", "drive", "driving", "crash", "wheel", "speeding")):
+            pair = (
+                f"{streamer_label}'s driving in GTA 6 is pure chaos",
+                f"Nobody let {streamer_label} behind the wheel again 💀\n\nDid you see that coming? 👇",
+            )
+        elif any(k in t_low for k in ("price", "money", "dollar", "million", "cash", "pay", "expensive")):
+            pair = (
+                f"{streamer_label} was shocked by these GTA 6 prices",
+                f"{streamer_label}'s reaction to this price tag is priceless 😂\n\nWould you pay that much? 👇",
+            )
+        elif any(k in t_low for k in ("spanish", "english", "language", "translate", "speak")):
+            pair = (
+                f"{streamer_label} trying to speak Spanish is hilarious",
+                f"{streamer_label} was fighting for his life right here 😭\n\nWho understood what he said? 👇",
+            )
+        elif any(k in t_low for k in ("baby", "girl", "love", "date", "rizz", "kiss")):
+            pair = (
+                f"{streamer_label} got caught lacking on stream",
+                f"Chat went crazy after {streamer_label} said this 😂\n\nRate this moment 1-10 in the comments 👇",
+            )
         else:
-            title = f"{streamer_label} Stream Highlight | {suffix}"
+            _VARIATIONS = (
+                (
+                    f"{streamer_label} lost it during GTA 6 live",
+                    f"Chat couldn't believe {streamer_label}'s reaction here 😭\n\nWait for the ending 👇",
+                ),
+                (
+                    f"You can't make this up on {streamer_label}'s stream",
+                    f"This {streamer_label} GTA 6 moment had everyone dying 😂\n\nThoughts on this? 👇",
+                ),
+                (
+                    f"Watch {streamer_label}'s reaction at the end",
+                    f"Nobody expected this to happen live on {streamer_label}'s stream 💀\n\nDid you catch this? 👇",
+                ),
+                (
+                    f"{streamer_label}'s funniest GTA 6 moment today",
+                    f"{streamer_label} really had no words after this 😳\n\nRate this clip 1-10 👇",
+                ),
+            )
+            pair = _VARIATIONS[seed % len(_VARIATIONS)]
+
+        suffix = camp_name.replace(" Clipping", "")
+        title = f"{pair[0]} | {suffix}"
         if no_links:
             title = strip_urls(title)
         title = title.replace("<", "").replace(">", "")[:100].strip()
 
-        _PROMPTS = (
-            "Did you see that coming? Drop your thoughts below!",
-            "Wait for the ending — how would you react here?",
-            "Rate this moment 1-10 in the comments!",
-            "This caught everyone off guard. What do you think?",
-            "Would you have pulled that off? Let us know!",
-        )
-        q = _PROMPTS[sum(ord(ch) for ch in srt_path.stem) % len(_PROMPTS)]
-        body_txt = f"{hook_clean}\n{q}" if hook_clean else q
-        if cta:
-            description = f"{body_txt}\n\n{cta}"
-        else:
-            description = body_txt
+        description = f"{pair[1]}\n\n{cta}".strip() if cta else pair[1]
         if no_links:
             description = strip_urls(description)
 
-        for extra in ("shorts", "gaming", "viral"):
+        for extra in (creator_tag, "gaming", "shorts", "viral"):
             if len(tags) >= 5:
                 break
-            if extra.lower() not in [str(t).lstrip("#").lower() for t in tags]:
+            if extra and extra.lower() not in [str(t).lstrip("#").lower() for t in tags]:
                 tags.append(extra)
 
         tags_str = " ".join(f"#{str(t).lstrip('#')}" for t in tags)

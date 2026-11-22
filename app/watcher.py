@@ -344,22 +344,29 @@ class WatcherController:
         srt_path = target.with_suffix(".srt")
         transcript = meta.get("transcript") or captioner.extract_srt_transcript(srt_path)
         chan = meta.get("channel") or self.channel or "kreekcraft"
-        base = captioner.build_default_metadata(srt_path, channel=chan, campaign_mode=self.campaign_mode)
+        rules = campaigns.get_campaign()
+        base = captioner.build_default_metadata(
+            srt_path, channel=chan, campaign_mode=self.campaign_mode, campaign_rules=rules
+        )
 
         provider = app_config.ai_provider()
         if provider and transcript:
+            req_cta = (rules.get("required_cta") or "").strip()
+            req_tags = list(rules.get("required_hashtags") or [])
+            streamer_name = "IShowSpeed" if ("ishowspeed" in name.lower() or "hwsg39yibg" in name.lower()) else (rules.get("streamer") or chan or "Streamer")
             sys_prompt = (
-                "You write accurate, high-retention short-form titles and human-sounding captions for KreekCraft's official GTA 6 streams. "
+                f"You write viral, human-sounding Shorts/TikTok titles and captions like top clippers for {streamer_name}.\n"
                 "STRICT RULES:\n"
-                "1. Never fabricate context or use misleading clickbait; stay 100% true to the transcript.\n"
-                "2. Write description as a natural 1-2 sentence human reaction + soft engagement question (never raw truncated speech), and include 'Watch KreekCraft on YouTube and Twitch! 🔴'.\n"
-                "3. Do NOT include any links or URLs anywhere.\n"
-                "4. Always include GTA6, KreekCraft, GrandTheftAutoVI plus 1-2 relevant broad discovery tags (e.g. shorts, gaming)."
+                "1. Write in 3rd-person reaction style (e.g. 'IShowSpeed lost it when...', 'Wait for his reaction...'), NEVER paste raw spoken transcript.\n"
+                "2. Format description as 1 punchy reaction line + blank line + 1 short engagement question with emoji.\n"
+                + (f"3. Include this exact CTA at the end: '{req_cta}'.\n" if req_cta else "3. Do NOT invent a stream link CTA.\n")
+                + "4. Do NOT include any links or URLs anywhere.\n"
+                + (f"5. Always include hashtags: {', '.join(req_tags)} plus 2-3 broad/creator tags (e.g. ishowspeed, gaming, shorts)." if req_tags else "5. Include 4-5 relevant creator, gaming, and shorts hashtags.")
             )
             from . import selector as _sel
             learn_ctx = _sel._build_learning_context()
             user_prompt = (
-                f"Streamer: KreekCraft (GTA 6 livestream)\n"
+                f"Streamer: {streamer_name}\n"
                 f"Spoken transcript:\n{transcript}"
                 f"{learn_ctx}\n\n"
                 "Return JSON matching the schema."
@@ -402,11 +409,11 @@ class WatcherController:
                 if parsed:
                     title = captioner.strip_urls(parsed.title).strip()[:100]
                     desc = captioner.strip_urls(parsed.description).strip()
-                    if self.campaign_mode and "watch kreekcraft on youtube and twitch" not in desc.lower():
-                        desc = f"{desc}\n\n{cw_config.CAMPAIGN_CTA}".strip()
+                    if self.campaign_mode and req_cta and req_cta.lower() not in desc.lower():
+                        desc = f"{desc}\n\n{req_cta}".strip()
                     tags = [h.lstrip("#").strip() for h in parsed.hashtags if h.strip()]
                     if self.campaign_mode:
-                        for req_tag in reversed(cw_config.CAMPAIGN_HASHTAGS):
+                        for req_tag in reversed(req_tags):
                             if req_tag.lower() not in [t.lower() for t in tags]:
                                 tags.insert(0, req_tag)
                     updated = self.update_meta(
