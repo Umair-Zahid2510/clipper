@@ -1580,7 +1580,7 @@ def publish_clip_multi_social(req: MultiPublishRequest) -> dict:
 def _classify_upload_error(err_msg: str) -> str:
     """Classify an upload error into 'quota_or_auth', 'transient', or 'clip_invalid'."""
     low = (err_msg or "").lower()
-    if any(k in low for k in ("429", "quota", "daily limit", "100 uploads", "upload limit")):
+    if any(k in low for k in ("429", "quota", "daily limit", "100 uploads", "upload limit", "spam_risk_too_many_pending_share", "pending_share", "spam_risk")):
         return "quota"
     if any(k in low for k in ("401", "expired", "revoked", "not connected", "reconnect", "access_token")):
         return "auth"
@@ -1700,16 +1700,20 @@ def _sequential_loop_worker() -> None:
                 if rotated_to:
                     continue
 
-                backoff_s = min(60, 20 * attempts) if "rate limit" in err_msg.lower() else min(60, 5 * (2 ** (attempts - 1)))
-                enriched_err = {
-                    "status": "error",
-                    "error": err_msg,
-                    "error_kind": err_kind,
-                    "attempts": attempts,
-                    "next_retry_at": time.time() + backoff_s if err_kind == "transient" and attempts < 3 else None,
-                    "retryable": err_kind != "clip_invalid",
-                }
-                _set_clip_field_by_key(candidate["key"], **{p: enriched_err})
+                backoff_s = 60 if ("rate limit" in err_msg.lower() or "rate_limit" in err_msg.lower()) else min(60, 5 * (2 ** (attempts - 1)))
+                is_tt_pending_share = p == "tiktok" and any(k in err_msg.lower() for k in ("spam_risk_too_many_pending_share", "pending_share", "spam_risk"))
+                if not is_tt_pending_share:
+                    enriched_err = {
+                        "status": "error",
+                        "error": err_msg,
+                        "error_kind": err_kind,
+                        "attempts": attempts,
+                        "next_retry_at": time.time() + backoff_s if err_kind == "transient" and attempts < 3 else None,
+                        "retryable": err_kind != "clip_invalid",
+                    }
+                    _set_clip_field_by_key(candidate["key"], **{p: enriched_err})
+                else:
+                    _set_clip_field_by_key(candidate["key"], **{p: None})
 
                 if err_kind in ("quota", "auth"):
                     if p == "youtube" and err_kind == "quota":
@@ -1723,7 +1727,7 @@ def _sequential_loop_worker() -> None:
                             continue
                     # Check if any other selected platform in loop_plats is still connected and usable
                     other_connected = [x for x in loop_plats if x != p and acc_status.get(x, {}).get("connected")]
-                    if not other_connected:
+                    if is_tt_pending_share or not other_connected:
                         with _loop_lock:
                             _loop_state["running"] = False
                             _loop_state["current_key"] = None

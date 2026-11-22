@@ -20,6 +20,8 @@ PLATFORMS = ("youtube", "tiktok", "instagram")
 APPROVAL_STATES = ("pending", "approved", "rejected")
 
 _store_lock = threading.Lock()
+_tt_rate_lock = threading.Lock()
+_last_tt_init_ts: float = 0.0
 
 
 # ---------- Token & Account Setup Store ----------
@@ -639,15 +641,21 @@ def upload_to_tiktok(
         progress(10)
 
     def _call_init(url: str, token: str, req_body: dict):
-        r = requests.post(
-            url,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json; charset=UTF-8",
-            },
-            json=req_body,
-            timeout=30,
-        )
+        global _last_tt_init_ts
+        with _tt_rate_lock:
+            wait = 15.0 - (time.monotonic() - _last_tt_init_ts)
+            if wait > 0:
+                time.sleep(wait)
+            r = requests.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json; charset=UTF-8",
+                },
+                json=req_body,
+                timeout=30,
+            )
+            _last_tt_init_ts = time.monotonic()
         d = r.json() if r.content else {}
         return r, d
 
@@ -680,6 +688,12 @@ def upload_to_tiktok(
             err_code = str(err.get("code") or "").lower()
 
     if resp.status_code >= 400 or (err_code and err_code != "ok"):
+        if "spam_risk_too_many_pending_share" in err_code or "pending_share" in err_code:
+            raise RuntimeError(
+                "TikTok Inbox draft limit reached (spam_risk_too_many_pending_share): "
+                "TikTok allows at most ~5 unpublished drafts in your App Inbox. "
+                "Open the TikTok mobile app on this account (Inbox -> System Notifications) to publish or clear pending drafts, then click Resume."
+            )
         msg = err.get("message") or data.get("message") or f"HTTP {resp.status_code}"
         raise RuntimeError(f"TikTok API rejected init ({err_code or resp.status_code}): {msg}")
 
@@ -706,13 +720,16 @@ def upload_to_tiktok(
     if progress:
         progress(100)
     handle = acc.get("title", "").lstrip("@")
-    return {
+    res = {
         "status": "done",
         "publish_id": publish_id,
         "post_mode": posted_mode,
         "account": acc.get("title"),
         "url": f"https://www.tiktok.com/@{handle}" if handle else "https://www.tiktok.com/",
     }
+    if posted_mode == "MEDIA_UPLOAD":
+        res["note"] = "Sent to TikTok App Inbox (open TikTok app notifications to publish)"
+    return res
 
 
 def upload_to_instagram(

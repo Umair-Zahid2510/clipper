@@ -418,8 +418,11 @@
             Delay between clips:
             <select id="loopDelay" style="width:auto;min-height:34px;padding:4px 10px;font-size:13px">
               <option value="0">0s (Immediate sequence)</option>
-              <option value="10" selected>10 seconds</option>
+              <option value="10">10 seconds</option>
+              <option value="15" selected>15 seconds (TikTok safe)</option>
+              <option value="20">20 seconds</option>
               <option value="30">30 seconds</option>
+              <option value="60">1 minute</option>
               <option value="120">2 minutes</option>
               <option value="600">10 minutes</option>
               <option value="1800">30 minutes</option>
@@ -920,7 +923,7 @@ function renderList() {
     const ig = it.instagram || {};
     const linksHtml = [
       y.status === "done" && y.url ? `<a class="ghost" style="min-height:26px;padding:0 9px;font-size:12px" href="${esc(y.url)}" target="_blank" rel="noopener">YouTube ↗</a>` : "",
-      tt.status === "done" && tt.url ? `<a class="ghost" style="min-height:26px;padding:0 9px;font-size:12px" href="${esc(tt.url)}" target="_blank" rel="noopener">TikTok ↗</a>` : "",
+      tt.status === "done" && tt.url ? `<a class="ghost" style="min-height:26px;padding:0 9px;font-size:12px" href="${esc(tt.url)}" target="_blank" rel="noopener" title="${esc(tt.note || '')}">${tt.post_mode === "MEDIA_UPLOAD" ? "TikTok Inbox ↗" : "TikTok ↗"}</a>` : "",
       ig.status === "done" && ig.url ? `<a class="ghost" style="min-height:26px;padding:0 9px;font-size:12px" href="${esc(ig.url)}" target="_blank" rel="noopener">Instagram ↗</a>` : "",
     ].filter(Boolean).join("");
 
