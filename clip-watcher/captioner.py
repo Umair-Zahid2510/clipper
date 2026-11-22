@@ -205,14 +205,27 @@ def build_default_metadata(
             title = strip_urls(title)
         title = title.replace("<", "").replace(">", "")[:100].strip()
 
-        if hook_clean and cta:
-            description = f"{hook_clean}\n\n{cta}"
-        elif cta:
-            description = cta
+        _PROMPTS = (
+            "Did you see that coming? Drop your thoughts below!",
+            "Wait for the ending — how would you react here?",
+            "Rate this moment 1-10 in the comments!",
+            "This caught everyone off guard. What do you think?",
+            "Would you have pulled that off? Let us know!",
+        )
+        q = _PROMPTS[sum(ord(ch) for ch in srt_path.stem) % len(_PROMPTS)]
+        body_txt = f"{hook_clean}\n{q}" if hook_clean else q
+        if cta:
+            description = f"{body_txt}\n\n{cta}"
         else:
-            description = hook_clean or f"{streamer_label} stream highlight"
+            description = body_txt
         if no_links:
             description = strip_urls(description)
+
+        for extra in ("shorts", "gaming", "viral"):
+            if len(tags) >= 5:
+                break
+            if extra.lower() not in [str(t).lstrip("#").lower() for t in tags]:
+                tags.append(extra)
 
         tags_str = " ".join(f"#{str(t).lstrip('#')}" for t in tags)
         social_caption = f"{description} {tags_str}".strip()
