@@ -150,10 +150,10 @@ def derive_cliffhanger_text(transcript: str, custom_template: str | None = None,
         first = first[:35].rsplit(" ", 1)[0].rstrip(" ,;:") + "..."
     if tmpl and "{hook}" in tmpl.lower():
         return re.sub(r"\{hook\}", first or "WAIT FOR IT...", tmpl, flags=re.I)[:44].upper()
-    if tmpl:
-        return tmpl[:42].upper()
     if first and len(first.split()) >= 2:
         return first[:42].upper()
+    if tmpl:
+        return tmpl[:42].upper()
     tag = _clean_hook(streamer or "THIS STREAM").upper()
     return f"WAIT FOR IT ({tag})"[:42]
 
