@@ -414,6 +414,24 @@ def download_zip(job_id: str) -> FileResponse:
                         background=BackgroundTask(os.unlink, tmp))
 
 
+@app.get("/api/watcher/zip")
+def download_watcher_zip() -> FileResponse:
+    files = sorted(p for p in watcher.OUTPUT_DIR.glob("*.mp4") if p.is_file())
+    if not files:
+        raise HTTPException(409, "No exported live clips found.")
+    fd, tmp = tempfile.mkstemp(suffix=".zip", dir=config.DATA_DIR)
+    os.close(fd)
+    try:
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED) as z:
+            for f in files:
+                z.write(f, f.name)
+    except BaseException:
+        os.unlink(tmp)
+        raise
+    return FileResponse(tmp, media_type="application/zip", filename="exported_live_clips.zip",
+                        background=BackgroundTask(os.unlink, tmp))
+
+
 @app.get("/api/jobs")
 def list_jobs() -> list[dict]:
     with _lock:
