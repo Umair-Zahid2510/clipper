@@ -137,25 +137,60 @@ def _esc_ass(text: str) -> str:
 
 
 def derive_cliffhanger_text(transcript: str, custom_template: str | None = None, streamer: str | None = None) -> str:
-    """Create a short, clean white-box hook banner (no emojis that render as broken boxes in libass)."""
-    def _clean_hook(s: str) -> str:
-        # Strip emojis/non-ASCII symbols that render as tofu boxes in Arial Black / libass
+    """Create a short, attention-catching white-box hook banner for the whole reel (no emojis for libass)."""
+    def _clean(s: str) -> str:
         s = re.sub(r"[^\x20-\x7E]", "", s or "")
         return " ".join(s.split()).strip(" \"'-—:")
 
-    tmpl = _clean_hook(custom_template or "")
-    sentences = [s.strip() for s in re.split(r"(?<=[.?!])\s+", strip_urls(transcript or "")) if s.strip()]
-    first = _clean_hook(sentences[0] if sentences else (transcript or "").strip())
-    if len(first) > 38:
-        first = first[:35].rsplit(" ", 1)[0].rstrip(" ,;:") + "..."
-    if tmpl and "{hook}" in tmpl.lower():
-        return re.sub(r"\{hook\}", first or "WAIT FOR IT...", tmpl, flags=re.I)[:44].upper()
-    if first and len(first.split()) >= 2:
-        return first[:42].upper()
-    if tmpl:
-        return tmpl[:42].upper()
-    tag = _clean_hook(streamer or "THIS STREAM").upper()
-    return f"WAIT FOR IT ({tag})"[:42]
+    t_low = (transcript or "").lower()
+    who = _clean(streamer or "")
+    if not who or who.lower() in ("kreekcraft", "yt", "live", "this stream"):
+        who = "SPEED" if any(w in t_low for w in ("speed", "ronaldo", "sewey", "ben")) else (who or "THIS")
+    who = who.upper()[:12]
+    seed = sum(ord(c) * (i + 1) for i, c in enumerate((transcript or who)[:80]))
+
+    if any(k in t_low for k in ("cop", "cops", "police", "helicopter", "arrest", "jail")):
+        choices = (
+            f"{who} VS THE COPS IN GTA 6",
+            "WAIT FOR HOW HE ESCAPES THIS",
+            "NO WAY HE SURVIVED THIS CHASE",
+        )
+    elif any(k in t_low for k in ("car", "drive", "driving", "crash", "wheel", "speeding")):
+        choices = (
+            f"WHO LET {who} DRIVE IN GTA 6",
+            "WAIT FOR THIS INSANE CRASH",
+            f"{who}'S DRIVING IS PURE CHAOS",
+        )
+    elif any(k in t_low for k in ("price", "money", "dollar", "million", "cash", "pay", "expensive")):
+        choices = (
+            f"{who}'S REACTION TO GTA 6 PRICES",
+            "WAIT TILL HE SEES THE PRICE",
+            "NO WAY IT COSTS THAT MUCH",
+        )
+    elif any(k in t_low for k in ("spanish", "english", "language", "translate", "speak")):
+        choices = (
+            f"{who} TRYING TO SPEAK SPANISH",
+            "WAIT FOR WHAT HE JUST SAID",
+            "WHO TAUGHT HIM THIS SPANISH",
+        )
+    elif any(k in t_low for k in ("baby", "girl", "love", "date", "rizz", "kiss")):
+        choices = (
+            f"{who} GOT CAUGHT LACKING LIVE",
+            "CHAT LOST IT AFTER THIS LINE",
+            "WAIT FOR HIS RIZZ AT THE END",
+        )
+    else:
+        choices = (
+            f"WAIT FOR {who}'S REACTION",
+            "YOU WON'T BELIEVE THE ENDING",
+            "CHAT LOST IT AT THE END",
+            "NOBODY EXPECTED THIS IN GTA 6",
+            "WATCH UNTIL THE LAST SECOND",
+            f"{who} HAD NO WORDS FOR THIS",
+            "THIS GTA 6 MOMENT IS UNREAL",
+            "HE REALLY DID THAT LIVE...",
+        )
+    return choices[seed % len(choices)][:42]
 
 
 def build_default_metadata(

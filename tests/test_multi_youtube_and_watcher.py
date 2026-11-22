@@ -563,8 +563,8 @@ def test_learning_context_and_word_pop_ass(monkeypatch, tmp_path):
     assert "\\fscx114\\fscy114\\t(0,80,\\fscx100\\fscy100)" in ass
 
     import captioner
-    hook_txt = captioner.derive_cliffhanger_text("He stole the police car right there!", "WAIT FOR THE END... 😱")
-    assert "😱" not in hook_txt and "STOLE THE POLICE CAR" in hook_txt and len(hook_txt) <= 44
+    hook_txt = captioner.derive_cliffhanger_text("He stole the police car right there!", "WAIT FOR THE END... 😱", "IShowSpeed")
+    assert "😱" not in hook_txt and len(hook_txt) <= 42 and "HE STOLE THE POLICE" not in hook_txt
 
 
 

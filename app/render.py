@@ -376,11 +376,9 @@ def render_clip(
         cap_words, cap_start = trim.remap_words(clip_words, start, keep), 0.0
     else:
         out_len, cap_words, cap_start = clip_len, clip_words, start
-    # Automatically generate a short, clean hook banner from the first spoken words if hook is None/empty
-    if hook is None and clip_words:
-        first_txt = " ".join(w.text for w in clip_words[:7]).strip()
-        if first_txt:
-            hook = first_txt[:38].upper()
+    # Fallback attention-catching hook if no AI/campaign hook was supplied
+    if hook is None:
+        hook = "WATCH UNTIL THE LAST SECOND"
 
     (out_dir / ass_name).write_text(
         build_ass(cap_words, cap_start, out_len, style, hook, size=(W, H), hook_top=split["top_h"] if split else None),
