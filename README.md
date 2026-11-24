@@ -1,4 +1,8 @@
-# clipper.io (Clipsmith)
+<p align="center">
+  <img src="docs/logo.png" alt="clipper.io logo" width="120" height="120" />
+</p>
+
+<h1 align="center">clipper.io (Clipsmith)</h1>
 
 **A free, open-source, self-hosted alternative to OpusClip. Turn long YouTube videos, local files, or live YouTube & Twitch streams into ready-to-post Shorts, TikToks, and Reels — with automated campaign compliance and multi-social publishing.**
 
