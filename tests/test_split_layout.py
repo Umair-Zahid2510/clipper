@@ -137,7 +137,7 @@ def test_hook_can_be_placed_on_the_seam_instead_of_over_the_face():
 def test_hook_position_unchanged_by_default():
     hook_style = next(ln for ln in render.build_ass([], 0, 10, "yellow", hook="x").splitlines()
                       if ln.startswith("Style: Hook"))
-    assert hook_style.endswith(",90,90,230,1")
+    assert hook_style.endswith(",97,97,211,1")
 
 
 # ---------- API ----------

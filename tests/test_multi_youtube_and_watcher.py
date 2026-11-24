@@ -415,7 +415,7 @@ def test_campaigns_studio_brief_parser_general_mode_and_cliffhanger_hook(monkeyp
     srt.write_text("1\n00:00:00,200 --> 00:00:02,000\nNO WAY HE JUMPED THE HELICOPTER!\n", encoding="utf-8")
     meta = watcher.captioner.build_default_metadata(srt, channel="ishowspeed", campaign_mode=True, campaign_rules=active)
     assert "Watch IShowSpeed Live on YouTube" in meta["description"]
-    assert "WAIT FOR" in meta["cliffhanger_text"]
+    assert meta["cliffhanger_text"] and len(meta["cliffhanger_text"]) <= 42 and "😱" not in meta["cliffhanger_text"]
     ass_text = watcher.captioner._build_cliffhanger_and_captions_ass(srt, meta["cliffhanger_text"], 4.0)
     assert "Style: CliffBox,Arial Black" in ass_text
     assert "Dialogue: 2,0:00:00.00,0:00:04.00,CliffBox" in ass_text

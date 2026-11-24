@@ -18,7 +18,7 @@ def client(monkeypatch):
 
 def test_status_reports_styles(client):
     data = client.get("/api/status").json()
-    assert set(data["styles"]) == {"yellow", "green", "clean"}
+    assert set(data["styles"]) == {"yellow", "green", "clean", "bw"}
     assert "missing" in data
 
 

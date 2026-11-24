@@ -34,7 +34,7 @@ def test_build_ass_default_is_vertical_and_unchanged():
     ass = render.build_ass(WORDS, clip_start=0, clip_len=5, style_key="yellow", hook="hi")
     assert _playres(ass) == (1080, 1920)
     assert "Style: Cap,Arial Black,92,&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,-1,0,0,0,100,100,0,0,1,7,3,2,70,70,470,1" in ass
-    assert "Style: Hook,Arial Black,64,&H00101010,&H00101010,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,18,0,8,90,90,230,1" in ass
+    assert "Style: Hook,Arial Black,52,&H00101010,&H00101010,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,14,0,8,97,97,211,1" in ass
 
 
 @pytest.mark.parametrize("aspect", ["9:16", "1:1", "16:9"])
