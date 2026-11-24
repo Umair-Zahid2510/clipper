@@ -1,143 +1,77 @@
-# Clipsmith
+# clipper.io (Clipsmith)
 
-**A free, open-source alternative to OpusClip. Turn one long YouTube video into a batch of ready-to-post Shorts, on your own laptop.**
+**A free, open-source, self-hosted alternative to OpusClip. Turn long YouTube videos, local files, or live YouTube & Twitch streams into ready-to-post Shorts, TikToks, and Reels — with automated campaign compliance and multi-social publishing.**
 
-[![tests](https://github.com/AbdulSamad94/clipsmith/actions/workflows/tests.yml/badge.svg)](https://github.com/AbdulSamad94/clipsmith/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
-![Runs offline](https://img.shields.io/badge/runs-offline-brightgreen)
-![No API key](https://img.shields.io/badge/API%20key-not%20needed-brightgreen)
+![Runs local](https://img.shields.io/badge/runs-local-brightgreen)
 ![No GPU](https://img.shields.io/badge/GPU-not%20needed-brightgreen)
-[![GitHub stars](https://img.shields.io/github/stars/AbdulSamad94/clipsmith?style=social)](https://github.com/AbdulSamad94/clipsmith/stargazers)
+[![Agent Skill](https://img.shields.io/badge/Agent%20Skill-SKILL.md-blueviolet)](SKILL.md)
 
-Paste a YouTube link. Clipsmith finds the best 30–60 second moments, crops them to vertical 9:16 around the speaker, burns in animated word-by-word captions, and ranks them by how likely they are to hold a viewer.
-
-- **Free and unlimited.** No credits, no monthly plan, no watermark, no clips that expire after 3 days.
-- **Runs offline.** Moment picking uses a local AI model (Qwen via Ollama). No API key, no account, your videos never leave your computer.
-- **Works on an ordinary laptop.** No GPU needed; it was built and tested on a 4-core Intel laptop CPU.
-
-> Not affiliated with OpusClip. "OpusClip" is mentioned only to describe what this project is an alternative to.
+> Not affiliated with OpusClip. "OpusClip" is mentioned only as a reference point.
 
 ![Clipsmith screenshot](docs/ss.png)
 
-## Clipsmith vs OpusClip
+## Why clipper.io?
 
-| | Clipsmith | OpusClip Free | OpusClip paid |
+| Feature | clipper.io | OpusClip Free | OpusClip Paid |
 |---|---|---|---|
-| Price | **Free forever** | $0 | from $15/month |
+| Price | **Free & Open Source (MIT)** | $0 | From $15/mo |
 | Clips per month | **Unlimited** | 60 credits | 150+ credits |
 | Watermark | **None** | Yes | No |
-| Clips expire | **Never** | After 3 days | After 30 days+ |
-| Runs on your computer, offline | **Yes** | No | No |
-| Your videos stay private | **Yes** | Uploaded | Uploaded |
-| Open source | **Yes (MIT)** | No | No |
-| AI picks + viral score | Yes | No score | Yes |
-| Animated captions + 9:16 reframe | Yes | Yes | Yes |
-| B-roll, scheduler, team features | Not yet | No | Yes |
+| Live Stream Catch-Up Watcher | **YouTube Live + Twitch** | No | Limited |
+| Multi-Social Auto-Posting | **YouTube + TikTok + IG Reels** | Limited | Yes |
+| Campaign Rules & Compliance Studio | **Built-in** | No | No |
+| Runs locally on your machine | **Yes** | No | No |
 
-*OpusClip details from its public pricing page, November 2026.*
+## Core Features
 
-## What it does
+1. **AI & Heuristic Clip Selection (`/`)**: Downloads YouTube videos (or accepts local files), transcribes with Whisper when captions are absent, picks high-retention moments, and learns from past `live_stats` (`views`, `engagement`) when an AI provider is enabled.
+2. **Pro Vertical Editing**:
+   - **9:16 Face-Tracking Reframe** (split facecam + gameplay or blurred background fit).
+   - **Animated Word-by-Word Pop Captions** (`build_ass`) + clean emoji-free white hook banners.
+   - **Broadcast Audio**: `-14 LUFS` `loudnorm` loudness normalization and smooth fade-in.
+3. **Live Stream Watcher & Parallel Catch-Up (`/watcher`)**: Monitors live YouTube/Twitch streams for chat hype spikes, backfills missed stream hours concurrently, and exports ZIP batches via `GET /api/watcher/zip`.
+4. **Campaigns & Rules Studio (`/campaigns`)**: Enforce required CTAs, hashtags, link stripping, and PNG/MOV/GIF logo overlays with real-time compliance badges.
+5. **Multi-Social Publishing & Anti-Block Loop (`/posts`)**:
+   - **YouTube Shorts**: OAuth + multi-channel rotation + live view/like/comment tracker.
+   - **TikTok**: Built-in PKCE (`S256`) OAuth, 24h auto-refresh, 24h Sandbox Inbox Draft (`MEDIA_UPLOAD`) caching, and 15s+ jittered `init` pacing.
+   - **Instagram Reels**: Graph API v21.0 resumable upload.
+   - **Graceful Sequential Loop**: `±30%` anti-block jitter, `65–95s` per-platform rate-limit cooldowns, `best_first` / `max_posts` targeting, and opt-in `Auto-wait on quota reset`.
 
-1. **Downloads** the video and YouTube's captions (or transcribes the audio with Whisper if there are none).
-2. **Picks the moments** that open strong, stand on their own and end on a complete thought, and gives each a viral score, a title, an on-screen hook, a caption and hashtags.
-3. **Reframes** to 9:16, following the speaker's face. Wide shots get the full frame over a blurred background instead.
-4. **Captions** every word as it's spoken, in one of three styles.
-5. **Exports** MP4s you can download, or post and schedule straight to YouTube.
+## Use as an AI Agent Skill
 
-## Install
+This repository includes a standard [`SKILL.md`](SKILL.md) (and [`.agents/skills/clipper-io/SKILL.md`](.agents/skills/clipper-io/SKILL.md)) compatible with **Antigravity, Claude Code, Cursor, Codex, Windsurf, Gemini CLI, and Agensi**.
 
-You need **Python 3.10+**, **ffmpeg** and, for AI moment picking, **Ollama**.
+## Quick Install & Run
 
 ### 1. Prerequisites
+- **Python 3.10+**
+- **ffmpeg** (`winget install Gyan.FFmpeg` on Windows, `brew install ffmpeg` on macOS, `sudo apt install ffmpeg` on Linux)
+- **Deno** or **Node.js** (required by `yt-dlp` for YouTube JS extraction)
+- *(Optional)* **Ollama** (`ollama pull qwen3.5:4b`) or a `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` in `.env`
 
-| | Windows | macOS | Linux |
-|---|---|---|---|
-| Python | [python.org](https://www.python.org/downloads/) | `brew install python` | your package manager |
-| ffmpeg | `winget install Gyan.FFmpeg` | `brew install ffmpeg` | `sudo apt install ffmpeg` |
-| Ollama | [ollama.com/download](https://ollama.com/download) | [ollama.com/download](https://ollama.com/download) | `curl -fsSL https://ollama.com/install.sh \| sh` |
-| Deno *(YouTube downloads need a JS runtime)* | `winget install DenoLand.Deno` | `brew install deno` | `curl -fsSL https://deno.land/install.sh \| sh` |
-
-Node.js works instead of Deno if you already have it.
-
-### 2. Download the AI model (about 3.3 GB, once)
-
+### 2. Setup & Launch
+```bash
+git clone https://github.com/Umair-Zahid2510/clipper.git
+cd clipper
 ```
-ollama pull qwen3.5:4b
-```
+- **Windows**: Double-click `setup.bat`, then `run.bat`
+- **macOS / Linux**: `./setup.sh`, then `./run.sh`
 
-### 3. Set up Clipsmith
+Open **http://127.0.0.1:8765** (Main Clipper), **/watcher** (Live Watcher), **/campaigns** (Campaign Studio), or **/posts** (Social Queue & Auto-Post Loop).
 
-```
-git clone https://github.com/AbdulSamad94/clipsmith.git
-cd clipsmith
-```
+## Configuration (`.env`)
 
-- **Windows:** double-click `setup.bat`
-- **macOS / Linux:** `./setup.sh`
+Copy `.env.example` to `.env`:
 
-## Run
+| Setting | Purpose |
+|---|---|
+| `AI_PROVIDER` | `ollama` (local), `gemini`, `claude`, or `none` (fast deterministic clipper copy) |
+| `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` | Cloud LLM key if not using local Ollama |
+| `YOUTUBE_CLIENT_ID` / `YOUTUBE_CLIENT_SECRET` | YouTube Data API v3 OAuth ([docs/youtube-setup.md](docs/youtube-setup.md)) |
+| `TIKTOK_CLIENT_KEY` / `TIKTOK_CLIENT_SECRET` | TikTok Content Posting API v2 PKCE OAuth |
 
-- **Windows:** double-click `run.bat`
-- **macOS / Linux:** `./run.sh`
-
-Then open **http://127.0.0.1:8765**, paste a YouTube link (or drop in a video file) and click **Get clips**.
-
-## Using it
-
-- **Clip settings:** pick the number of clips, the clip length and the aspect ratio (9:16, 1:1 or 16:9). Choose a caption style and framing, and switch the opening hook text and pause/"uh" removal on or off.
-- **Focus (optional):** describe what the clips should be about, or limit them to part of the video with **From** and **To** (like `12:30`).
-- **Progress:** each video shows three steps (get the video, pick the best moments, cut and caption) with what's happening right now. Finished clips appear while the rest are still rendering.
-- **Your clips:** each clip shows its rank, length, score, the hook it opens with and why it was picked. **Download** it, **Post to YouTube**, or open the **⋯** menu to copy the caption, post again or delete the clip. Fold any clip into one line with the arrow; posted clips fold by themselves. Older videos start folded too.
-
-The page works with a keyboard and a screen reader: every control has a label and a visible focus ring, and progress and upload changes are announced.
-
-## How long it takes
-
-On a 4-core laptop CPU, a 12-minute video takes about **10 minutes**: a few minutes for the AI to read it, then about 1–3 minutes per clip to render. Longer videos take proportionally longer. Fewer clips means faster results.
-
-## Post straight to YouTube
-
-Connect your channel once and every clip gets a **Post to YouTube** button: the AI's title, description and hashtags are filled in, and you can post now or **schedule** it (YouTube publishes it at that time, even if your computer is off). Setup takes about 5 minutes with your own free Google app: see **[docs/youtube-setup.md](docs/youtube-setup.md)**.
-
-## Choosing the AI
-
-Set this in `.env` (copy it from `.env.example`):
-
-| Option | Cost | Speed | Setting |
-|---|---|---|---|
-| **Local Qwen** (default) | Free | Slow on CPU | `AI_PROVIDER=ollama` |
-| Google Gemini | Free tier | Fast | `AI_PROVIDER=gemini` + `GEMINI_API_KEY` |
-| Anthropic Claude | Paid | Fast | `AI_PROVIDER=claude` + `ANTHROPIC_API_KEY` |
-| None | Free | Fastest | `AI_PROVIDER=none` (basic scoring by rules) |
-
-On a machine with more RAM or a GPU, try a bigger local model for better picks, e.g. `OLLAMA_MODEL=qwen3.5:9b`.
-
-## Known limitations
-
-- The small local model sometimes gets facts or numbers wrong in titles. **Check titles before posting.**
-- Face tracking is basic (OpenCV). Fast camera cuts can make the crop lag.
-- Posting is built in for YouTube only; for TikTok and Reels, download the MP4 and upload it yourself.
-
-## Roadmap
-
-- [x] Filler word and silence removal
-- [x] "Prompt to clip": describe the moment you want
-- [x] Post and schedule directly to YouTube
-- [ ] Edit clip start/end and caption text before export
-- [ ] Keyword and emoji highlights in captions
-- [ ] Brand template (logo, fonts, colours)
-
-Contributions are welcome! **Designers especially:** UI/UX ideas are wanted, see [issue #24](https://github.com/AbdulSamad94/clipsmith/issues/24). See [CONTRIBUTING.md](CONTRIBUTING.md) and the [`good first issue`](https://github.com/AbdulSamad94/clipsmith/labels/good%20first%20issue) label. If Clipsmith saves you money, a ⭐ helps other people find it.
-
-## Use responsibly
-
-Only post clips of videos you own, or that the creator allows you to clip (for example through a creator's clipping or affiliate program). Re-uploading other people's streams or videos without permission can lead to Content ID claims and copyright strikes.
-
-Monetization is a separate question: YouTube's [reused-content policy](https://support.google.com/youtube/answer/1311392) is separate from copyright and **applies even if you have permission from the original creator**. Channels that mostly repost others' content with little of their own added can be refused monetization.
-
-Downloading from YouTube may also break YouTube's Terms of Service. You are responsible for how you use this tool.
-
-## License
-
-[MIT](LICENSE)
+## Known Platform Limits
+- **YouTube Data API v3**: `videos.insert` has a 100 calls/day quota bucket (resets midnight PT). Enable **Auto-wait on quota reset** in `/posts` for multi-day queues.
+- **TikTok Unaudited / Sandbox Apps**: Public accounts fall back to Inbox Drafts (`MEDIA_UPLOAD`), which TikTok caps at ~5 unpublished drafts until cleared in the TikTok mobile app (**Inbox -> System Notifications**).
