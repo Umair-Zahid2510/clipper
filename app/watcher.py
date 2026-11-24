@@ -380,6 +380,9 @@ class WatcherController:
                         parsed = _ShortCaption.model_validate_json(raw)
                     finally:
                         local_llm.unload()
+                elif provider in ("groq", "openrouter"):
+                    raw = _sel._ask_openai_compat(provider, sys_prompt, user_prompt, _ShortCaption.model_json_schema())
+                    parsed = _ShortCaption.model_validate_json(raw)
                 elif provider == "gemini":
                     from google import genai
 

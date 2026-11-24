@@ -177,6 +177,39 @@ def _ask_claude(prompt: str) -> _Picks:
     return response.parsed_output
 
 
+def _ask_openai_compat(provider: str, system: str, prompt: str, schema: dict) -> str:
+    """Call OpenAI-compatible free-tier APIs (Groq or OpenRouter) returning JSON text."""
+    import json, os, requests
+
+    if provider == "groq":
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        key = os.environ.get("GROQ_API_KEY", "").strip()
+        model = config.GROQ_MODEL
+    elif provider == "openrouter":
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+        model = config.OPENROUTER_MODEL
+    else:
+        raise ValueError(f"Unsupported OpenAI-compatible provider: {provider}")
+    if not key:
+        raise RuntimeError(f"Missing API key for {provider}.")
+
+    sys_msg = f"{system}\n\nRespond ONLY with valid JSON matching this schema:\n{json.dumps(schema)}"
+    res = requests.post(
+        url,
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        json={
+            "model": model,
+            "messages": [{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt}],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.4,
+        },
+        timeout=60,
+    )
+    res.raise_for_status()
+    return res.json()["choices"][0]["message"]["content"]
+
+
 _LOCAL_CHUNK_WORDS = 1800  # keeps each request inside a small model's context and a few minutes on CPU
 
 
@@ -229,6 +262,10 @@ def select_with_ai(
     last = len(sentences) - 1
     if provider == "ollama":
         picked = _ask_ollama(sentences, title, count, min_len, max_len, progress, prompt)
+    elif provider in ("groq", "openrouter"):
+        text = _prompt(sentences, title, count, min_len, max_len, prompt=prompt)
+        picks = _Picks.model_validate_json(_ask_openai_compat(provider, _SYSTEM, text, _Picks.model_json_schema()))
+        picked = [(p, 0, last) for p in picks.clips]
     else:
         text = _prompt(sentences, title, count, min_len, max_len, prompt=prompt)
         picks = _ask_gemini(text) if provider == "gemini" else _ask_claude(text)

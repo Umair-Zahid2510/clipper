@@ -22,6 +22,8 @@ os.environ.setdefault("HF_HOME", str(MODELS_DIR / "hf"))
 
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-5-5")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "qwen/qwen3.8-27b")
+OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "inclusionai/ling-3.2-flash:free")
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "small")
 
 OUT_W, OUT_H = 1080, 1920
@@ -37,15 +39,19 @@ OLLAMA_CTX = int(os.environ.get("OLLAMA_CTX", "8192"))
 
 
 def ai_provider() -> str | None:
-    """Which AI picks the moments: "ollama" (local), "gemini", "claude", or None.
+    """Which AI picks the moments: "ollama", "gemini", "claude", "groq", "openrouter", or None.
     AI_PROVIDER in .env forces one; otherwise whichever is configured wins."""
     forced = os.environ.get("AI_PROVIDER", "").strip().lower()
-    if forced in ("ollama", "gemini", "claude"):
+    if forced in ("ollama", "gemini", "claude", "groq", "openrouter"):
         return forced
     if forced in ("none", "basic"):
         return None
     if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
         return "gemini"
+    if os.environ.get("GROQ_API_KEY"):
+        return "groq"
+    if os.environ.get("OPENROUTER_API_KEY"):
+        return "openrouter"
     if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
         return "claude"
     if OLLAMA_EXE and os.path.exists(OLLAMA_EXE):

@@ -136,6 +136,35 @@ def _esc_ass(text: str) -> str:
     return (text or "").replace("\\", "").replace("{", "(").replace("}", ")")
 
 
+def fetch_youtube_seo_tags(query: str, limit: int = 3) -> list[str]:
+    """Fetch live YouTube search autocomplete tags (zero auth/quota); returns [] if offline."""
+    import functools, requests
+
+    @functools.lru_cache(maxsize=64)
+    def _cached(q: str) -> tuple[str, ...]:
+        try:
+            r = requests.get(
+                "https://suggestqueries.google.com/complete/search",
+                params={"client": "firefox", "ds": "yt", "q": q},
+                timeout=2.5,
+            )
+            if r.status_code != 200:
+                return ()
+            data = r.json()
+            suggestions = data[1] if isinstance(data, list) and len(data) > 1 and isinstance(data[1], list) else []
+            out: list[str] = []
+            for s in suggestions:
+                clean = "".join(w.capitalize() if i > 0 else w for i, w in enumerate(re.findall(r"[A-Za-z0-9]+", str(s))))
+                if 3 <= len(clean) <= 24 and clean.lower() not in [x.lower() for x in out]:
+                    out.append(clean)
+            return tuple(out)
+        except Exception:
+            return ()
+
+    q_clean = " ".join(re.findall(r"[A-Za-z0-9]+", query or ""))[:40]
+    return list(_cached(q_clean))[:limit] if q_clean else []
+
+
 def derive_cliffhanger_text(transcript: str, custom_template: str | None = None, streamer: str | None = None) -> str:
     """Create a short, attention-catching white-box hook banner for the whole reel (no emojis for libass)."""
     def _clean(s: str) -> str:
@@ -298,7 +327,8 @@ def build_default_metadata(
         if no_links:
             description = strip_urls(description)
 
-        for extra in (creator_tag, "gaming", "shorts", "viral"):
+        seo_tags = fetch_youtube_seo_tags(f"{streamer_label} {tags[0] if tags else ''}", limit=2)
+        for extra in (creator_tag, *seo_tags, "gaming", "shorts", "viral"):
             if len(tags) >= 5:
                 break
             if extra and extra.lower() not in [str(t).lstrip("#").lower() for t in tags]:

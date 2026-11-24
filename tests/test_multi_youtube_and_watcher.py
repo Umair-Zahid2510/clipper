@@ -567,6 +567,34 @@ def test_learning_context_and_word_pop_ass(monkeypatch, tmp_path):
     assert "😱" not in hook_txt and len(hook_txt) <= 42 and "HE STOLE THE POLICE" not in hook_txt
 
 
+def test_groq_openrouter_and_youtube_seo_tags(monkeypatch):
+    import json, requests
+    import captioner
+    from app import config, selector
+
+    monkeypatch.setenv("AI_PROVIDER", "groq")
+    assert config.ai_provider() == "groq"
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_test")
+
+    class FakeResp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self):
+            return {"choices": [{"message": {"content": json.dumps({"ok": True})}}]}
+
+    monkeypatch.setattr(requests, "post", lambda *a, **kw: FakeResp())
+    assert json.loads(selector._ask_openai_compat("groq", "sys", "usr", {"type": "object"})) == {"ok": True}
+
+    class FakeSeoResp:
+        status_code = 200
+        def json(self):
+            return ["gta 6", ["gta 6 trailer", "gta 6 gameplay", "gta 6 clips"]]
+
+    monkeypatch.setattr(requests, "get", lambda *a, **kw: FakeSeoResp())
+    tags = captioner.fetch_youtube_seo_tags("gta 6", limit=2)
+    assert tags == ["gta6Trailer", "gta6Gameplay"]
+
+
 
 
 
