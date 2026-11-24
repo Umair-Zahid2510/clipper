@@ -260,16 +260,26 @@ def select_with_ai(
     prompt: str = "",
 ) -> list[Clip]:
     last = len(sentences) - 1
-    if provider == "ollama":
-        picked = _ask_ollama(sentences, title, count, min_len, max_len, progress, prompt)
-    elif provider in ("groq", "openrouter"):
-        text = _prompt(sentences, title, count, min_len, max_len, prompt=prompt)
-        picks = _Picks.model_validate_json(_ask_openai_compat(provider, _SYSTEM, text, _Picks.model_json_schema()))
-        picked = [(p, 0, last) for p in picks.clips]
-    else:
-        text = _prompt(sentences, title, count, min_len, max_len, prompt=prompt)
-        picks = _ask_gemini(text) if provider == "gemini" else _ask_claude(text)
-        picked = [(p, 0, last) for p in picks.clips]
+    chain = [provider] + [p for p in config.ai_providers() if p != provider]
+    picked = None
+    last_err: Exception | None = None
+    for prov in chain:
+        try:
+            if prov == "ollama":
+                picked = _ask_ollama(sentences, title, count, min_len, max_len, progress, prompt)
+            elif prov in ("groq", "openrouter"):
+                text = _prompt(sentences, title, count, min_len, max_len, prompt=prompt)
+                picks = _Picks.model_validate_json(_ask_openai_compat(prov, _SYSTEM, text, _Picks.model_json_schema()))
+                picked = [(p, 0, last) for p in picks.clips]
+            else:
+                text = _prompt(sentences, title, count, min_len, max_len, prompt=prompt)
+                picks = _ask_gemini(text) if prov == "gemini" else _ask_claude(text)
+                picked = [(p, 0, last) for p in picks.clips]
+            break
+        except Exception as exc:
+            last_err = exc
+    if picked is None:
+        raise last_err or RuntimeError("No AI provider succeeded.")
 
     clips: list[Clip] = []
     for p, lo, hi in picked:

@@ -38,25 +38,31 @@ OLLAMA_MODELS_DIR = os.environ.get("OLLAMA_MODELS", "")
 OLLAMA_CTX = int(os.environ.get("OLLAMA_CTX", "8192"))
 
 
-def ai_provider() -> str | None:
-    """Which AI picks the moments: "ollama", "gemini", "claude", "groq", "openrouter", or None.
-    AI_PROVIDER in .env forces one; otherwise whichever is configured wins."""
+def ai_providers() -> list[str]:
+    """Ordered list of configured AI providers for automatic fallback (forced AI_PROVIDER first)."""
     forced = os.environ.get("AI_PROVIDER", "").strip().lower()
-    if forced in ("ollama", "gemini", "claude", "groq", "openrouter"):
-        return forced
     if forced in ("none", "basic"):
-        return None
-    if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
-        return "gemini"
+        return []
+    avail: list[str] = []
     if os.environ.get("GROQ_API_KEY"):
-        return "groq"
+        avail.append("groq")
+    if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
+        avail.append("gemini")
     if os.environ.get("OPENROUTER_API_KEY"):
-        return "openrouter"
+        avail.append("openrouter")
     if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
-        return "claude"
+        avail.append("claude")
     if OLLAMA_EXE and os.path.exists(OLLAMA_EXE):
-        return "ollama"
-    return None
+        avail.append("ollama")
+    if forced in ("ollama", "gemini", "claude", "groq", "openrouter"):
+        return [forced] + [p for p in avail if p != forced]
+    return avail
+
+
+def ai_provider() -> str | None:
+    """Primary AI provider (backward-compatible wrapper over ai_providers())."""
+    provs = ai_providers()
+    return provs[0] if provs else None
 
 
 def missing_tools() -> list[str]:

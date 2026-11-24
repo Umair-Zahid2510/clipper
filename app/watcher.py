@@ -349,8 +349,8 @@ class WatcherController:
             srt_path, channel=chan, campaign_mode=self.campaign_mode, campaign_rules=rules
         )
 
-        provider = app_config.ai_provider()
-        if provider and transcript:
+        providers = app_config.ai_providers()
+        if providers and transcript:
             req_cta = (rules.get("required_cta") or "").strip()
             req_tags = list(rules.get("required_hashtags") or [])
             streamer_name = "IShowSpeed" if ("ishowspeed" in name.lower() or "hwsg39yibg" in name.lower()) else (rules.get("streamer") or chan or "Streamer")
@@ -371,68 +371,70 @@ class WatcherController:
                 f"{learn_ctx}\n\n"
                 "Return JSON matching the schema."
             )
-            try:
-                if provider == "ollama":
-                    from . import local_llm
+            for provider in providers:
+                try:
+                    parsed = None
+                    if provider == "ollama":
+                        from . import local_llm
 
-                    try:
-                        raw = local_llm.chat_json(sys_prompt, user_prompt, _ShortCaption.model_json_schema())
+                        try:
+                            raw = local_llm.chat_json(sys_prompt, user_prompt, _ShortCaption.model_json_schema())
+                            parsed = _ShortCaption.model_validate_json(raw)
+                        finally:
+                            local_llm.unload()
+                    elif provider in ("groq", "openrouter"):
+                        raw = _sel._ask_openai_compat(provider, sys_prompt, user_prompt, _ShortCaption.model_json_schema())
                         parsed = _ShortCaption.model_validate_json(raw)
-                    finally:
-                        local_llm.unload()
-                elif provider in ("groq", "openrouter"):
-                    raw = _sel._ask_openai_compat(provider, sys_prompt, user_prompt, _ShortCaption.model_json_schema())
-                    parsed = _ShortCaption.model_validate_json(raw)
-                elif provider == "gemini":
-                    from google import genai
+                    elif provider == "gemini":
+                        from google import genai
 
-                    client = genai.Client()
-                    res = client.interactions.create(
-                        model=app_config.GEMINI_MODEL,
-                        input=f"{sys_prompt}\n\n{user_prompt}",
-                        response_format={
-                            "type": "text",
-                            "mime_type": "application/json",
-                            "schema": _ShortCaption.model_json_schema(),
-                        },
-                    )
-                    parsed = _ShortCaption.model_validate_json(res.output_text)
-                else:
-                    import anthropic
+                        client = genai.Client()
+                        res = client.interactions.create(
+                            model=app_config.GEMINI_MODEL,
+                            input=f"{sys_prompt}\n\n{user_prompt}",
+                            response_format={
+                                "type": "text",
+                                "mime_type": "application/json",
+                                "schema": _ShortCaption.model_json_schema(),
+                            },
+                        )
+                        parsed = _ShortCaption.model_validate_json(res.output_text)
+                    else:
+                        import anthropic
 
-                    client = anthropic.Anthropic()
-                    res = client.messages.parse(
-                        model=app_config.CLAUDE_MODEL,
-                        max_tokens=1024,
-                        system=sys_prompt,
-                        messages=[{"role": "user", "content": user_prompt}],
-                        output_format=_ShortCaption,
-                    )
-                    parsed = res.parsed_output
-                if parsed:
-                    title = captioner.strip_urls(parsed.title).strip()[:100]
-                    desc = captioner.strip_urls(parsed.description).strip()
-                    if self.campaign_mode and req_cta and req_cta.lower() not in desc.lower():
-                        desc = f"{desc}\n\n{req_cta}".strip()
-                    tags = [h.lstrip("#").strip() for h in parsed.hashtags if h.strip()]
-                    if self.campaign_mode:
-                        for req_tag in reversed(req_tags):
-                            if req_tag.lower() not in [t.lower() for t in tags]:
-                                tags.insert(0, req_tag)
-                    updated = self.update_meta(
-                        name,
-                        title=title or base["title"],
-                        description=desc or base["description"],
-                        hashtags=tags[:5],
-                    )
-                    return {
-                        "title": updated["title"],
-                        "description": updated["description"],
-                        "hashtags": updated["hashtags"],
-                        "source": provider,
-                    }
-            except Exception:
-                pass
+                        client = anthropic.Anthropic()
+                        res = client.messages.parse(
+                            model=app_config.CLAUDE_MODEL,
+                            max_tokens=1024,
+                            system=sys_prompt,
+                            messages=[{"role": "user", "content": user_prompt}],
+                            output_format=_ShortCaption,
+                        )
+                        parsed = res.parsed_output
+                    if parsed:
+                        title = captioner.strip_urls(parsed.title).strip()[:100]
+                        desc = captioner.strip_urls(parsed.description).strip()
+                        if self.campaign_mode and req_cta and req_cta.lower() not in desc.lower():
+                            desc = f"{desc}\n\n{req_cta}".strip()
+                        tags = [h.lstrip("#").strip() for h in parsed.hashtags if h.strip()]
+                        if self.campaign_mode:
+                            for req_tag in reversed(req_tags):
+                                if req_tag.lower() not in [t.lower() for t in tags]:
+                                    tags.insert(0, req_tag)
+                        updated = self.update_meta(
+                            name,
+                            title=title or base["title"],
+                            description=desc or base["description"],
+                            hashtags=tags[:5],
+                        )
+                        return {
+                            "title": updated["title"],
+                            "description": updated["description"],
+                            "hashtags": updated["hashtags"],
+                            "source": provider,
+                        }
+                except Exception:
+                    continue
 
         updated = self.update_meta(
             name,

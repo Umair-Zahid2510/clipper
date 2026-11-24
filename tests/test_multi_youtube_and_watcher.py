@@ -573,8 +573,10 @@ def test_groq_openrouter_and_youtube_seo_tags(monkeypatch):
     from app import config, selector
 
     monkeypatch.setenv("AI_PROVIDER", "groq")
-    assert config.ai_provider() == "groq"
     monkeypatch.setenv("GROQ_API_KEY", "gsk_test")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or_test")
+    assert config.ai_provider() == "groq"
+    assert config.ai_providers()[:2] == ["groq", "openrouter"]
 
     class FakeResp:
         status_code = 200
