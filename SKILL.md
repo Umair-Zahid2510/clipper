@@ -8,7 +8,7 @@ description: >-
   auto-post to YouTube Shorts, TikTok, or Instagram Reels.
 ---
 
-# clipper.io (Clipsmith) Agent Skill
+# Clipper Agent Skill
 
 Automate end-to-end short-form video clipping, vertical 9:16 rendering, campaign rule compliance, and jittered multi-social publishing via the local `clipper.io` FastAPI server (`http://127.0.0.1:8765`).
 
@@ -61,3 +61,4 @@ curl -s http://127.0.0.1:8765/api/posts
 ## Known Platform Limits
 - **YouTube Data API v3**: `videos.insert` has a 100 calls/day bucket (resetting midnight PT). Enable `auto_wait_quota: true` to sleep and auto-resume cleanly.
 - **TikTok Content Posting API v2 (Unaudited/Sandbox)**: Public accounts fall back to Inbox Drafts (`MEDIA_UPLOAD`, capped at ~5 unpublished drafts in the TikTok mobile app Inbox). Clear pending drafts in **TikTok App -> Inbox -> System Notifications**, then resume the loop.
+

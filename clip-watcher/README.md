@@ -4,7 +4,7 @@ Monitors a live Twitch stream in real time, detects chat hype spikes via anonymo
 
 ## Requirements
 
-- Python 3.10+ (uses the parent Clipsmith `.venv`)
+- Python 3.10+ (uses the parent Clipper `.venv`)
 - `ffmpeg` and `ffprobe` on `PATH`
 - Python packages in `requirements.txt` (`streamlink`, `faster-whisper`, `rich`, `python-dotenv`, `numpy`)
 
@@ -26,7 +26,7 @@ RETENTION_SECONDS=300
 
 ## Run
 
-From the repository root (`clipsmith`):
+From the repository root (`clipper`):
 
 ```powershell
 .\.venv\Scripts\python.exe clip-watcher\main.py

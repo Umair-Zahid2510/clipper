@@ -1,4 +1,4 @@
-# Contributing to Clipsmith
+# Contributing to Clipper
 
 Thanks for helping. Bug reports, ideas and pull requests are all welcome.
 
@@ -21,7 +21,7 @@ Thanks for helping. Bug reports, ideas and pull requests are all welcome.
 
 ## Good places to start
 
-Look for issues labelled [`good first issue`](https://github.com/AbdulSamad94/clipsmith/labels/good%20first%20issue). Items on the README roadmap are fair game too; comment on the issue first so two people don't build the same thing.
+Look for issues labelled [`good first issue`](https://github.com/Umair-Zahid2510/clipper/labels/good%20first%20issue). Items on the README roadmap are fair game too; comment on the issue first so two people don't build the same thing.
 
 ## UI and design changes
 
@@ -42,7 +42,7 @@ Write the test first, watch it fail, then make it pass. Tests must not need the 
 
 - Keep each PR to one change.
 - Run at least one real video through the app before opening it.
-- Clipsmith must keep working **with no API key and no GPU**. That's the point of the project.
+- Clipper must keep working **with no API key and no GPU**. That's the point of the project.
 - Don't commit videos, clips or `.env`.
 
 ## Reporting bugs

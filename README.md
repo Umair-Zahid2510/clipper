@@ -118,5 +118,8 @@ Copy `.env.example` to `.env`:
 - **YouTube Data API v3**: `videos.insert` has a 100 calls/day quota bucket (resetting midnight PT). Enable **Auto-wait on quota reset** in `/posts` for multi-day queues.
 - **TikTok Unaudited / Sandbox Apps**: Public accounts fall back to Inbox Drafts (`MEDIA_UPLOAD`), capped at ~5 unpublished drafts until cleared in the TikTok mobile app (**Inbox -> System Notifications**).
 
+## Acknowledgments
+Built on the foundation of [AbdulSamad94/clipsmith](https://github.com/AbdulSamad94/clipsmith), with the live YouTube/Twitch stream watcher, parallel catch-up pipeline, campaign compliance studio, multi-provider AI fallback, and multi-social auto-posting loop added on top.
+
 ## License
 MIT — see [LICENSE](LICENSE).

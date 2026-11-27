@@ -598,7 +598,7 @@ async function loadWatcherBadge() {
 
 // ---------- YouTube ----------
 let yt = { configured: false, connected: false, channel: null, accounts: [], active_id: null };
-const SETUP_DOC = "https://github.com/AbdulSamad94/clipsmith/blob/main/docs/youtube-setup.md";
+const SETUP_DOC = "https://github.com/Umair-Zahid2510/clipper/blob/main/docs/youtube-setup.md";
 
 async function loadYouTube() {
   try {
@@ -666,7 +666,7 @@ function ytStatusHtml(s) {
     return `<div class="yt-box busy">
       <div class="yt-row"><span class="yt-title"><span class="spin" aria-hidden="true"></span><span class="yt-label">${label}</span></span><span class="yt-pct">${p}%</span></div>
       <div class="bar" role="progressbar" aria-label="YouTube upload" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${p}"><div style="width:${p}%"></div></div>
-      <div class="yt-hint">Keep Clipsmith open until this finishes. You can keep using the app.</div></div>`;
+      <div class="yt-hint">Keep Clipper open until this finishes. You can keep using the app.</div></div>`;
   }
   if (s.status === "error") {
     return `<div class="yt-box err">${ICON_ALERT}<div><b>Couldn't post to YouTube</b><div>${esc(s.error)}</div></div></div>`;

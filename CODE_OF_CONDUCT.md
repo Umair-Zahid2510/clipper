@@ -4,4 +4,4 @@ This project follows the [Contributor Covenant, version 2.1](https://www.contrib
 
 In short: be respectful, assume good intent, no harassment or personal attacks. Maintainers may remove comments, commits or contributors that break this.
 
-Report problems by opening a private [security advisory](https://github.com/AbdulSamad94/clipsmith/security/advisories/new) or contacting the maintainer through GitHub.
+Report problems by opening a private [security advisory](https://github.com/Umair-Zahid2510/clipper/security/advisories/new) or contacting the maintainer through GitHub.

@@ -1,5 +1,5 @@
 name: Feature request
-description: Suggest something Clipsmith should do
+description: Suggest something Clipper should do
 labels: ["enhancement"]
 body:
   - type: textarea
